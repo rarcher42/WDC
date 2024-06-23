@@ -1,24 +1,8 @@
 
 ;Intel HEX File Downloader
-;Ross Archer, 9 February 2001
-;
+; R. Archer 6/2024
 ;This program is freeware. Use it, modify it, ridicule it in public, or whatever, so long as authorship credit (blame?) is given somewhere to me for the base program.
 ;
-;Although this program has worked on two different 65C02-based boards, with TASM output files, I make no warranty of fitness or anything else. It's free -- so no matter what, happens you get your money's worth.;
-;
-;Feel free to write me at dogbert@mindless.com if you are having difficulties or have suggestions for improvement. This is still a work in progress.
-;
-;To customize for your 6551-equipped 6502 SBC
-;[UK users have dispensation to customise it instead.]
-;
-;    Set ACIA_BASE to the location of your 6551 ACIA (UART).
-;    Change ENTRY_POINT as needed, if you prefer to jump somewhere other than to $0200 after downloading code to RAM.
-;    Change .org location to locate START wherever you like. I put it in the top 2K of memory since my hardware write-protects the EEPROM there but allows me to write to the lower 30K at will, making this the only 100% safe place for monitor code in EE. YMMV
-;    When burning EPROMs, remember to account for the File offset with your programmer. For example, if burning a 32K E(E)PROM, the offset is $8000. If using a 16K E(E)PROM, the offset is $C000, etc. Best to see that your start vectors are in the top six locations in your E(E)PROM as a sanity check before blasting away.
-;    ALL RAM-ified programs you download MUST have an entry point at ENTRY_POINT, if only as a jump instruction to somewhere else.
-;    If the user program uses NMI or IRQs, it is responsible for writing the RAM "shadow" vectors at RUN-TIME prior to enabling interrupts. This is because the hex monitor initializes them to a "sane" values pointing into the ROM monitor on every reset, so recovery from user program crashes is always possible.
-;    A lot of nice things are missing. For example, no timeouts are provided since that would require support of additional timer hardware. It seems that if a download halts, pressing the big red RESET button is the right thing to do anyways. :) This is minimal bootstrap. It does the job needed and little more. 
-
 ; ($7FEB, $7FEA):	NMI RAM vector
 ; ($7FEF, $7FEE):       IRQ RAM vector
 ; (User program may not set a new RESET vector, or we could load
@@ -26,26 +10,24 @@
 ; kill the system until the RAM was removed!)
 ;
 ;
-; TIDE2VIA
-;
-;	
-	FIFO_VIA_BASE = $7FE0	; TIDE VIA
-	IORB	= 	FIFO_VIA_BASE + 0
-	IORA	= 	FIFO_VIA_BASE + 1
-	DDRB	=	FIFO_VIA_BASE + 2	; PB bitmap: 0=input 1git =output
-	DDRA 	=	FIFO_VIA_BASE + 3	; PA bitmap: 0=input 1=output
-	T1CL	=	FIFO_VIA_BASE + 4
-	T1CH	=	FIFO_VIA_BASE + 5
-	T1LL	=	FIFO_VIA_BASE + 6
-	T1LH	=	FIFO_VIA_BASE + 7	
-	T2CL	=	FIFO_VIA_BASE + 8
-	T2CH	=	FIFO_VIA_BASE + 9
-	SR	=	FIFO_VIA_BASE + 10
-	ACR 	=	FIFO_VIA_BASE + 11
-	PCR	=	FIFO_VIA_BASE + 12
-	IFR	=	FIFO_VIA_BASE + 13
-	IER	=	FIFO_VIA_BASE + 14
-	IORA_NH	=	FIFO_VIA_BASE + 15
+; TIDE2VIA	
+; IO for the VIA which is used for the USB debugger interface.
+SYSTEM_VIA_IOB              = $7FE0 ; Port B IO register
+SYSTEM_VIA_IOA              = $7FE1 ; Port A IO register
+SYSTEM_VIA_DDRB             = $7FE2 ; Port B data direction register
+SYSTEM_VIA_DDRA             = $7FE3 ; Port A data direction register
+SYSTEM_VIA_T1C_L           = $7FE4 ; Timer 1 counter/latches, low-order
+SYSTEM_VIA_T1C_H           = $7FE5 ; Timer 1 high-order counter
+SYSTEM_VIA_T1L_L           = $7FE6 ; Timer 1 low-order latches
+SYSTEM_VIA_T1L_H           = $7FE7 ; Timer 1 high-order latches
+SYSTEM_VIA_T2C_L           = $7FE8 ; Timer 2 counter/latches, lower-order
+SYSTEM_VIA_T2C_H           = $7FE9 ; Timer 2 high-order counter
+SYSTEM_VIA_SR              = $7FEA ; Shift register
+SYSTEM_VIA_ACR              = $7FEB ; Auxilliary control register
+SYSTEM_VIA_PCR              = $7FEC ; Peripheral control register
+SYSTEM_VIA_IFR             = $7FED ; Interrupt flag register
+SYSTEM_VIA_IER             = $7FEE ; Interrupt enable register
+SYSTEM_VIA_ORA_IRA         = $7FEF ; Port A IO register, but no handshake
 
 
 ; 6551 ACIA equates for serial I/O
@@ -94,6 +76,7 @@ START   sei                     ; disable interrupts
         lda     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         sta     NMIVEC
         sta     IRQVEC
+	jsr	Initialize_System_VIA
         jsr     INITSER         ; Set up baud rate, parity, etc.
         ; Download Intel hex.  The program you download MUST have its entry
         ; instruction (even if only a jump to somewhere else) at ENTRY_POINT.
@@ -208,6 +191,64 @@ INITSER lda     #SCTL_V 	; Set baud rate 'n stuff
         sta     SCMD
         rts
 
+
+; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
+Initialize_System_VIA:
+        ; Disable PB7, shift register, timer T1 interrupt.
+        lda     #$00
+        STA     SYSTEM_VIA_ACR
+
+        ; Cx1/Cx2 as inputs with negative active edge, for both ports. These
+        ; aren't used for the system VIA debugging interface, but the Cx2
+        ; lines are connected to the FLASH, and they select the bank. Setting
+        ; them as inputs allows the pullups to automatically select the bank
+        ; which contains the factory-programmed FLASH bank with the monitor.
+        lda     #$00
+        STA     SYSTEM_VIA_PCR
+
+       
+        ; Preset port B output for $18 (TUSB_RDB and PB4-not-connected high).
+        lda     #$18
+        STA     SYSTEM_VIA_IOB
+
+        ; Set PB2 (TUSB_WR), PB3 (TUSB_RDB), and PB4 (N.C.) as outputs. This
+        ; has the effect of writing $FF to the USB FIFO when the RESET button
+        ; is pressed. When RESET is pressed, it causes the system VIA to output
+        ; high on TUSB_WR, then when this write sets TUSB_WR low, the high-to-
+        ; low transition on TUSB_WR triggers a write to the USB FIFO. At this
+        ; point, port A (the USB FIFO data lines) are not being driven, and
+        ; either float high, or are pulled high internally, because this
+        ; triggers a write of $FF to the USB FIFO.
+        lda     #$1C
+        STA     SYSTEM_VIA_DDRB
+        ; Set all IO on port A to inputs.
+        LDA     #$00
+        STA     SYSTEM_VIA_DDRA
+
+        ; Read port B (USB status and control lines) and save it on the stack.
+        lda     SYSTEM_VIA_IOB
+        PHA
+
+        ; Mask out bit 4, which is not connected.
+        AND     #$EF
+
+        ; Write the result back. Not sure why since only bit 4 changes, and
+        ; it is not connected (according to schematic rev. C, Dec. 15, 2020).
+        STA     SYSTEM_VIA_IOB
+
+        ; Delay for $5D*256 loop cycles.
+        LDX     #$5D
+        JSR     WASTETM
+
+        ; Pull the original port B value, and write it back to the port.
+        PLA
+        STA     SYSTEM_VIA_IOB
+
+        ; Wait until PB5 (TUSB_PWRENB) goes low, indicating it's powered up.
+        lda     #$20
+wfpwr:  bit     SYSTEM_VIA_IOB
+        BNE     wfpwr
+        RTS
 ;
 ;
 ; SerRdy : Return
@@ -286,6 +327,19 @@ PSIX1   inc     DPL             ;
         inc     DPH             ; account for page crossing
 PSIX2   jmp     (DPL)           ; return to byte following final NULL
 ;
+
+; Delays by looping 256*X times.
+WASTETM	phx
+        ldx     #$00
+loop_256_times:
+        dex
+        bne     loop_256_times
+        plx
+        dex
+        bne    	WASTETM
+        rts
+
+
 ; User "shadow" vectors:
 GOIRQ	jmp	(IRQVEC)
 GONMI	jmp	(NMIVEC)
