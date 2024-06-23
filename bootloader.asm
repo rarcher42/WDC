@@ -8,6 +8,10 @@
 ;
 ;Intel HEX File Downloader
 ; R. Archer 6/2024
+; Assembled with 64TASS
+; 		64tass -c bootloader.asm -L bootloader.lst
+
+
 ;This program is freeware. Use it, modify it, ridicule it in public, or whatever, so long as authorship credit (blame?) is given somewhere to me for the base program.
 ;
 ; ($7FEB, $7FEA):	NMI RAM vector
@@ -47,9 +51,9 @@ SCMD = ACIA_BASE+2     	; Serial command reg. ()
 SCTL = ACIA_BASE+3     	; Serial control reg. ()
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
-; to run 19200 baud, no parity, 8 data bits, 1 stop bit.  Period.  For now.
+; to run 19200 baud, no parity, 8 data BITs, 1 stop BIT.  Period.  For now.
 ;
-SCTL_V  = %00011111       ; 1 stop, 8 bits, 19200 baud
+SCTL_V  = %00011111       ; 1 stop, 8 BITs, 19200 baud
 SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ, DTR*
 TX_RDY  = %00010000       ; AND mask for transmitter ready
 RX_RDY  = %00001000       ; AND mask for receiver buffer full
@@ -72,27 +76,217 @@ IRQVEC   =       $7EFE   ; write IRQ vector here
 ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 
 * = $F800
+;\; Waits for a byte to be ready on the USB FIFO and then reads it, returning
+; the value read in the A register.
+; Note: Destroys A, flags
+; 
+; On exit:
+; If C==1 then A contains the next FIFO byte
+; If C==0 then there was nothing waiting and A is not guaranteed to mean anything
 ;
+GETFIFO	PHX				; Save X
+	STZ     SYSTEM_VIA_DDRA		; D0-D7 from FIFO --> CPU (00 = make all port A pins inputs)
+        ; Set up to test PB1 (TUSB_RXFB).
+        LDA     #$02
+        ; Wait for PB1 (TUSB_RXFB) to be low. This indicates data can be
+        ; read from the FIFO by strobing PB3 low then high again.
+	BIT     SYSTEM_VIA_IOB	; AND with b1 to see if RXF is low (character awaiting read) or RXF=1 (no data waiting)
+       	BEQ     GFRD		; 0 = FIFO has a character, so read it in
+	; No character waiting.  Exit with carry clear and A=??
+	CLC			; carry clear means nothing is waiting
+	BRA GFXIT		; And return with carry clear because is waiting
+        ; Perform a read-modify-write on port B, clearing PB3 (TUSB_RDB).
+        ; This triggers the FIFO to drive the received byte on port A.
+GFRD: 	LDA     SYSTEM_VIA_IOB
+        ora     #$08    ; Save a copy of port B with PB3 set high.
+        tax     ; This will be used later.
+        and     #$F7
+        STA     SYSTEM_VIA_IOB
+
+        ; Wait for the FIFO to drive the data and the lines to settle
+        ; (between 20ns and 50ns, according to the datasheet).
+        nop	; FIXME: This is some dumb bullshift. That's ONE machine cycle.  
+	; At 2 cycles per instruction at most one NOP should be required to accomplish the above comment.  
+        nop	; FIXME: Will retain for now in case it's papering over some other problem that the original firmware is working around.	
+        nop	
+        NOP
+
+        ; Read the data byte from the FIFO on port A.
+        LDA     SYSTEM_VIA_IOA		
+
+        ; Restore the original value of port B, while setting PB3 high again.
+        stx     SYSTEM_VIA_IOB
+	SEC		; Signal that a valid character is waiting
+GFXIT	PLX		; Restore X as it was used in routine
+	RTS
+
+; Call with A = character byte to sned
+; Returns with carry set if successfully queued
+; Returns with carry clear if FIFO back to PC is full and would fail.
+PUTFIFO	
+	PHX		; Save X since it's used here
+	; If no room in queue, return immediately with carry clear
+       	LDA     #$01	; Wait for PB0 (TUSB_TXEB) to be low. This indicates FIFO can 
+        		; accept a new byte by CPU strobing PB2 (TUSB_WR) high then low.
+	BIT     SYSTEM_VIA_IOB
+        BEQ     PFTXGO	
+	CLC
+	BRA	PFXIT	; FIFO is full; exit with carry clear to signal error to caller
+	
+PFTXGO	STZ     SYSTEM_VIA_DDRA		; Set all BITs on port A to inputs.
+
+        ; Write register A to port A. This has no effect on the actual
+        ; output pin until port A is set as an output.
+       	STA     SYSTEM_VIA_IOA
+        ; Set up register A to test port B, BIT 0 (TUSB_TXEB).
+ 
+
+        ; Perform a read-modify-write on port B, setting BIT 2 (TUSB_WR).
+        ; Save the original value in X temporarily.
+        LDA     SYSTEM_VIA_IOB
+        AND     #$FB	; Save a copy of port B with PB2 low.
+        TAX
+        ora     #$04	; Set PB2 high.
+        STA     SYSTEM_VIA_IOB
+
+        ; Set all BITs on port A to outputs. This causes the pin outputs
+        ; to be set to what we wrote to port A earlier in the subroutine.
+        LDA     #$FF
+        STA     SYSTEM_VIA_DDRA
+
+        ; Wait for the port A outputs to settle. The datasheet says this
+        ; must be held at least 20 ns before PB2 (TUSB_WR) is brought low.
+        NOP
+        NOP
+
+        ; Write the original port B value back, setting PB2 back to low.
+        STX     SYSTEM_VIA_IOB
+
+        ; Read port A. But why? The values read should be the actual
+        ; values driven on the pins, which may not be what we commanded
+        ; them to if, for example, they are heavily loaded. This value
+        ; is returned in the A register, and could be examined by the
+        ; caller. But this is not used anywhere in the monitor.
+        LDA     SYSTEM_VIA_IOA
+
+        ; Set all BITs in port A as inputs.
+        ldx     #$00
+        STX     SYSTEM_VIA_DDRA
+	SEC					; Character was queued OK
+PFXIT:	PLX
+	RTS
+
+
 START   sei                     ; disable interrupts
         cld                     ; binary mode arithmetic
         ldx     #$FF            ; Set up the stack pointer
         txs                     ;       "
-        lda     #>START      ; Initialiaze the interrupt vectors
+        LDA     #>START      	; Initialiaze the interrupt vectors
         sta     NMIVEC+1        ; User program at ENTRY_POINT may change
         sta     IRQVEC+1	; these vectors.  Just do change before enabling
-        lda     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         sta     NMIVEC
         sta     IRQVEC
-	jsr	INITVIA	; Set up 65C22 to FIFO interface chip (and ROM bank select)
+	jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
         jsr     INITSER         ; Set up baud rate, parity, etc.
 FIFOCHK	jsr	GETFIFO
 	bcc	FIFOCHK		; If no character, nothing to echo 		
-FIFO_OUT
 	jsr	PUTFIFO
 	bra	FIFOCHK
-        ; Download Intel hex.  The program you download MUST have its entry
-        ; instruction (even if only a jump to somewhere else) at ENTRY_POINT.
-HEXDNLD lda     #0
+
+; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
+INITVIA	STZ SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
+
+        ; Cx1/Cx2 as inputs with negative active edge, for both ports. These
+        ; aren't used for the system VIA debugging interface, but the Cx2
+        ; lines are connected to the FLASH, and they select the bank. Setting
+        ; them as inputs allows the pullups to automatically select the bank
+        ; which contains the factory-programmed FLASH bank with the monitor.
+        STZ     SYSTEM_VIA_PCR
+
+       
+        ; Preset port B output for $18 (TUSB_RDB and PB4-not-connected high).
+        LDA     #$18
+        STA     SYSTEM_VIA_IOB
+
+        ; Set PB2 (TUSB_WR), PB3 (TUSB_RDB), and PB4 (N.C.) as outputs. This
+        ; has the effect of writing $FF to the USB FIFO when the RESET button
+        ; is pressed. When RESET is pressed, it causes the system VIA to output
+        ; high on TUSB_WR, then when this write sets TUSB_WR low, the high-to-
+        ; low transition on TUSB_WR triggers a write to the USB FIFO. At this
+        ; point, port A (the USB FIFO data lines) are not being driven, and
+        ; either float high, or are pulled high internally, because this
+        ; triggers a write of $FF to the USB FIFO.
+        LDA     #$1C
+        STA     SYSTEM_VIA_DDRB
+        ; Set all IO on port A to inputs.
+        STZ     SYSTEM_VIA_DDRA
+
+        ; Read port B (USB status and control lines) and save it on the stack.
+        LDA     SYSTEM_VIA_IOB
+        PHA
+
+        ; Mask out BIT 4, which is not connected.
+        AND     #$EF
+
+        ; Write the result back. Not sure why since only BIT 4 changes, and
+        ; it is not connected (according to schematic rev. C, Dec. 15, 2020).
+        STA     SYSTEM_VIA_IOB
+
+        ; Delay for $5D*256 loop cycles.
+        LDX     #$5D
+        JSR     WASTETM
+
+        ; Pull the original port B value, and write it back to the port.
+        PLA
+        STA     SYSTEM_VIA_IOB
+
+        ; Wait until PB5 (TUSB_PWRENB) goes low, indicating it's powered up.
+        LDA     #$20
+WFPWRBIT    
+	LDA	SYSTEM_VIA_IOB
+        BNE     WFPWRBIT
+        RTS
+;
+
+; Returns 1 in A if there is data available to be read, 0 if not.
+Is_VIA_USB_RX_Data_Avail:
+
+        ; Set all BITs on port A to inputs.
+        LDA     #$00
+        STA     SYSTEM_VIA_DDRA
+
+        ; See if PB1 (TUSB_RXFB) is high.
+        LDA     #$02
+        BIT     SYSTEM_VIA_IOB
+        bne     not_zero
+
+        ; It is low, meaning there is data available to read.
+        LDA     #$01
+        RTS
+
+not_zero	
+	LDA     #$00	; It is high, meaning there is no data available to read.
+        RTS
+
+
+; A subroutine which does absolutely nothing.
+Do_Nothing_Subroutine_1:
+        rts
+
+; Delays by looping 256*X times.
+WASTETM	phx
+        ldx     #$00
+loop_256_times:
+        dex
+        bne     loop_256_times
+        plx
+        dex
+        bne    	WASTETM
+        rts
+
+;
+HEXDNLD LDA     #0
         sta     DLFAIL          ;Start by assuming no D/L failure
         jsr     PUTSTRI
         .text   13,10,13,10
@@ -123,7 +317,7 @@ HDWRECS jsr     GETSER          ; Wait for start of record mark ':'
         clc
         adc     CHKSUM
         sta     CHKSUM
-        lda     RECTYPE
+        LDA     RECTYPE
         bne     HDER1           ; end-of-record
         ldx     RECLEN          ; number of data bytes to write to memory
         ldy     #0              ; start offset at 0
@@ -140,10 +334,10 @@ HDLP1   jsr     GETHEX          ; Get the first/next/last data byte
         adc     CHKSUM
         bne     HDDLF1          ; If failed, report it
         ; Another successful record has been processed
-        lda     #'#'            ; Character indicating record OK = '#'
+        LDA     #'#'            ; Character indicating record OK = '#'
         sta     SDR             ; write it out but don't wait for output
         jmp     HDWRECS         ; get next record
-HDDLF1  lda     #'F'            ; Character indicating record failure = 'F'
+HDDLF1  LDA     #'F'            ; Character indicating record failure = 'F'
         sta     DLFAIL          ; download failed if non-zero
         sta     SDR             ; write it to transmit buffer register
         jmp     HDWRECS         ; wait for next record start
@@ -153,12 +347,12 @@ HDER1   cmp     #1              ; Check for end-of-record type
         .text   13,10,13,10
         .text   "Unknown record type $"
 	.text	0		; null-terminate unless you prefer to crash!
-        lda     RECTYPE         ; Get it
+        LDA     RECTYPE         ; Get it
 	sta	DLFAIL		; non-zero --> download has failed
         jsr     PUTHEX          ; print it
-	lda     #13		; but we'll let it finish so as not to
+	LDA     #13		; but we'll let it finish so as not to
         jsr     PUTSER		; falsely start a new d/l from existing
-        lda     #10		; file that may still be coming in for
+        LDA     #10		; file that may still be coming in for
         jsr     PUTSER		; quite some time yet.
 	jmp	HDWRECS
 	; We've reached the end-of-record record
@@ -171,7 +365,7 @@ HDER2   jsr     GETHEX          ; get the checksum
         .text   "Bad record checksum!",13,10
         .text   0		; Null-terminate or 6502 go bye-bye
         jmp     START
-HDER3   lda     DLFAIL
+HDER3   LDA     DLFAIL
         beq     HDEROK
         ;A download failure has occurred
         jsr     PUTSTRI
@@ -185,9 +379,9 @@ HDEROK  jsr     PUTSTRI
         .text   "Download Successful!",13,10
         .text   "Jumping to location $"
 	.text	0			; by now, I figure you know what this is for. :)
-        lda	#>ENTRY_POINT		; Print the entry point in hex
+        LDA	#>ENTRY_POINT		; Print the entry point in hex
         jsr	PUTHEX
-        lda	#<ENTRY_POINT
+        LDA	#<ENTRY_POINT
 	jsr	PUTHEX
         jsr	PUTSTRI
         .text   13,10
@@ -195,81 +389,25 @@ HDEROK  jsr     PUTSTRI
         jmp     ENTRY_POINT	; jump to canonical entry point
 
 ;
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; Set up baud rate, parity, stop BITs, interrupt control, etc. for
 ; the serial port.
-INITSER lda     #SCTL_V 	; Set baud rate 'n stuff
+INITSER LDA     #SCTL_V 	; Set baud rate 'n stuff
         sta     SCTL
-        lda     #SCMD_V 	; set parity, interrupt disable, n'stuff
+        LDA     #SCMD_V 	; set parity, interrupt disable, n'stuff
         sta     SCMD
         rts
-
-
-; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
-INITVIA	STZ     SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
-
-        ; Cx1/Cx2 as inputs with negative active edge, for both ports. These
-        ; aren't used for the system VIA debugging interface, but the Cx2
-        ; lines are connected to the FLASH, and they select the bank. Setting
-        ; them as inputs allows the pullups to automatically select the bank
-        ; which contains the factory-programmed FLASH bank with the monitor.
-        STZ     SYSTEM_VIA_PCR
-
-       
-        ; Preset port B output for $18 (TUSB_RDB and PB4-not-connected high).
-        lda     #$18
-        STA     SYSTEM_VIA_IOB
-
-        ; Set PB2 (TUSB_WR), PB3 (TUSB_RDB), and PB4 (N.C.) as outputs. This
-        ; has the effect of writing $FF to the USB FIFO when the RESET button
-        ; is pressed. When RESET is pressed, it causes the system VIA to output
-        ; high on TUSB_WR, then when this write sets TUSB_WR low, the high-to-
-        ; low transition on TUSB_WR triggers a write to the USB FIFO. At this
-        ; point, port A (the USB FIFO data lines) are not being driven, and
-        ; either float high, or are pulled high internally, because this
-        ; triggers a write of $FF to the USB FIFO.
-        lda     #$1C
-        STA     SYSTEM_VIA_DDRB
-        ; Set all IO on port A to inputs.
-        STZ     SYSTEM_VIA_DDRA
-
-        ; Read port B (USB status and control lines) and save it on the stack.
-        lda     SYSTEM_VIA_IOB
-        PHA
-
-        ; Mask out bit 4, which is not connected.
-        AND     #$EF
-
-        ; Write the result back. Not sure why since only bit 4 changes, and
-        ; it is not connected (according to schematic rev. C, Dec. 15, 2020).
-        STA     SYSTEM_VIA_IOB
-
-        ; Delay for $5D*256 loop cycles.
-        LDX     #$5D
-        JSR     WASTETM
-
-        ; Pull the original port B value, and write it back to the port.
-        PLA
-        STA     SYSTEM_VIA_IOB
-
-        ; Wait until PB5 (TUSB_PWRENB) goes low, indicating it's powered up.
-        lda     #$20
-WFPWRBIT    
-	LDA	SYSTEM_VIA_IOB
-        BNE     WFPWRBIT
-        RTS
-;
 ;
 ; SerRdy : Return
-SERRDY  lda     SSR     	; look at serial status
-        and     #RX_RDY 	; strip off "character waiting" bit
+SERRDY  LDA     SSR     	; look at serial status
+        and     #RX_RDY 	; strip off "character waiting" BIT
         rts             	; if zero, nothing waiting.
 ; Warning: this routine busy-waits until a character is ready.
 ; If you don't want to wait, call SERRDY first, and then only
 ; call GETSER once a character is waiting.
-GETSER  lda     SSR    		; look at serial status
+GETSER  LDA     SSR    		; look at serial status
         and     #RX_RDY 	; see if anything is ready
         beq     GETSER  	; busy-wait until character comes in!
-        lda     SDR     	; get the character
+        LDA     SDR     	; get the character
         rts
 ; Busy wait
 
@@ -310,7 +448,7 @@ PRNIBL  and     #$0F    	; strip off the low nibble
 NOTHEX  adc     #'0'    	; If carry clear, we're 0-9
 ; Write the character in A as ASCII:
 PUTSER  sta     SDR     	; write to transmit register
-WRS1    lda     SSR     	; get status
+WRS1    LDA     SSR     	; get status
         and     #TX_RDY 	; see if transmitter is busy
         beq     WRS1    	; if it is, wait
         rts
@@ -322,7 +460,7 @@ PUTSTRI pla			; Get the low part of "return" address (data start address)
                                 ; (data start address)
         ; Note: actually we're pointing one short
 PSINB   ldy     #1
-        lda     (DPL),y         ; Get the next string character
+        LDA     (DPL),y         ; Get the next string character
         inc     DPL             ; update the pointer
         bne     PSICHO          ; if not, we're pointing to next character
         inc     DPH             ; account for page crossing
@@ -335,140 +473,6 @@ PSIX1   inc     DPL             ;
         inc     DPH             ; account for page crossing
 PSIX2   jmp     (DPL)           ; return to byte following final NULL
 ;
-
-; Returns 1 in A if there is data available to be read, 0 if not.
-Is_VIA_USB_RX_Data_Avail:
-
-        ; Set all bits on port A to inputs.
-        LDA     #$00
-        STA     SYSTEM_VIA_DDRA
-
-        ; See if PB1 (TUSB_RXFB) is high.
-        LDA     #$02
-        bit     SYSTEM_VIA_IOB
-        bne     not_zero
-
-        ; It is low, meaning there is data available to read.
-        LDA     #$01
-        RTS
-
-not_zero	
-	LDA     #$00	; It is high, meaning there is no data available to read.
-        RTS
-
-; Waits for a byte to be ready on the USB FIFO and then reads it, returning
-; the value read in the A register.
-; Note: Destroys A, flags
-; 
-; On exit:
-; If C==1 then A contains the next FIFO byte
-; If C==0 then there was nothing waiting and A is not guaranteed to mean anything
-;
-GETFIFO	PHX				; Save X
-	STZ     SYSTEM_VIA_DDRA		; D0-D7 from FIFO --> CPU (00 = make all port A pins inputs)
-        ; Set up to test PB1 (TUSB_RXFB).
-        LDA     #$02
-        ; Wait for PB1 (TUSB_RXFB) to be low. This indicates data can be
-        ; read from the FIFO by strobing PB3 low then high again.
-	BIT     SYSTEM_VIA_IOB	; AND with b1 to see if RXF is low (character awaiting read) or RXF=1 (no data waiting)
-       	BEQ     GFRD		; 0 = FIFO has a character, so read it in
-	; No character waiting.  Exit with carry clear and A=??
-	CLC			; carry clear means nothing is waiting
-	BRA GFXIT		; And return with carry clear because is waiting
-        ; Perform a read-modify-write on port B, clearing PB3 (TUSB_RDB).
-        ; This triggers the FIFO to drive the received byte on port A.
-GFRD: 	lda     SYSTEM_VIA_IOB
-        ora     #$08    ; Save a copy of port B with PB3 set high.
-        tax     ; This will be used later.
-        and     #$F7
-        STA     SYSTEM_VIA_IOB
-
-        ; Wait for the FIFO to drive the data and the lines to settle
-        ; (between 20ns and 50ns, according to the datasheet).
-        nop	; FIXME: This is some dumb bullshift. That's ONE machine cycle.  
-	; At 2 cycles per instruction at most one NOP should be required to accomplish the above comment.  
-        nop	; FIXME: Will retain for now in case it's papering over some other problem that the original firmware is working around.	
-        nop	
-        NOP
-
-        ; Read the data byte from the FIFO on port A.
-        LDA     SYSTEM_VIA_IOA		
-
-        ; Restore the original value of port B, while setting PB3 high again.
-        stx     SYSTEM_VIA_IOB
-	SEC		; Signal that a valid character is waiting
-GFXIT	PLX		; Restore X as it was used in routine
-	RTS
-
-; The different case styles are deliberate but intended to be temporary.
-; Makes "new"/FIFO code obvious until it's debugged. Normalize style after integrated.
-;
-; Sends the byte stored in A to the debugger, waiting until it can be sent.
-PUTFIFO		
-	STZ     SYSTEM_VIA_DDRA		; Set all bits on port A to inputs.
-
-        ; Write register A to port A. This has no effect on the actual
-        ; output pin until port A is set as an output.
-       	STA     SYSTEM_VIA_IOA
-
-        ; Set up register A to test port B, bit 0 (TUSB_TXEB).
-        LDA     #$01
-
-        ; Wait for PB0 (TUSB_TXEB) to be low. This indicates data can be
-        ; written to the FIFO by strobing PB2 (TUSB_WR) high then low.
-WFTXEBL		
-	bit     SYSTEM_VIA_IOB
-        BNE     WFTXEBL
-
-        ; Perform a read-modify-write on port B, setting bit 2 (TUSB_WR).
-        ; Save the original value in X temporarily.
-        lda     SYSTEM_VIA_IOB
-        AND     #$FB	; Save a copy of port B with PB2 low.
-        TAX
-        ora     #$04	; Set PB2 high.
-        STA     SYSTEM_VIA_IOB
-
-        ; Set all bits on port A to outputs. This causes the pin outputs
-        ; to be set to what we wrote to port A earlier in the subroutine.
-        lda     #$FF
-        STA     SYSTEM_VIA_DDRA
-
-        ; Wait for the port A outputs to settle. The datasheet says this
-        ; must be held at least 20 ns before PB2 (TUSB_WR) is brought low.
-        NOP
-        NOP
-
-        ; Write the original port B value back, setting PB2 back to low.
-        STX     SYSTEM_VIA_IOB
-
-        ; Read port A. But why? The values read should be the actual
-        ; values driven on the pins, which may not be what we commanded
-        ; them to if, for example, they are heavily loaded. This value
-        ; is returned in the A register, and could be examined by the
-        ; caller. But this is not used anywhere in the monitor.
-        LDA     SYSTEM_VIA_IOA
-
-        ; Set all bits in port A as inputs.
-        ldx     #$00
-        STX     SYSTEM_VIA_DDRA
-
-        ; All done.
-        rts
-
-; A subroutine which does absolutely nothing.
-Do_Nothing_Subroutine_1:
-        rts
-
-; Delays by looping 256*X times.
-WASTETM	phx
-        ldx     #$00
-loop_256_times:
-        dex
-        bne     loop_256_times
-        plx
-        dex
-        bne    	WASTETM
-        rts
 
 
 ; User "shadow" vectors:
