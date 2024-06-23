@@ -19,8 +19,8 @@
 ;    If the user program uses NMI or IRQs, it is responsible for writing the RAM "shadow" vectors at RUN-TIME prior to enabling interrupts. This is because the hex monitor initializes them to a "sane" values pointing into the ROM monitor on every reset, so recovery from user program crashes is always possible.
 ;    A lot of nice things are missing. For example, no timeouts are provided since that would require support of additional timer hardware. It seems that if a download halts, pressing the big red RESET button is the right thing to do anyways. :) This is minimal bootstrap. It does the job needed and little more. 
 
-; ($7FEB, $7FEA):	NMI RAM vector
-; ($7FEF, $7FEE):       IRQ RAM vector
+; ($7EFB, $7EFA):	NMI RAM vector
+; ($7EFF, $7EFE):       IRQ RAM vector
 ; (User program may not set a new RESET vector, or we could load
 ; an unrecoverable program into SRAM if battery backed, which would
 ; kill the system until the RAM was removed!)
