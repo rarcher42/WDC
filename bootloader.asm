@@ -54,8 +54,8 @@
 	TEMP =          $08     ; save hex value
 
 ; "Shadow" RAM vectors (note each is $8000 below the actual ROM vector)
-	NMIVEC	= 	$7FEA	; write actual NMI vector here
-	IRQVEC   =       $7FEE   ; write IRQ vector here
+	NMIVEC	= 	 $7EFA	; write actual NMI vector here
+	IRQVEC   =       $7EFE   ; write IRQ vector here
 
 	ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 
