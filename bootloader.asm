@@ -74,8 +74,25 @@ NMIVEC	= 	 $7EFA	; write actual NMI vector here
 IRQVEC   =       $7EFE   ; write IRQ vector here
 
 ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
+*= $F800
+START   sei                     ; disable interrupts
+        cld                     ; binary mode arithmetic
+        ldx     #$FF            ; Set up the stack pointer
+        txs                     ;       "
+        LDA     #>START      	; Initialiaze the interrupt vectors
+        sta     NMIVEC+1        ; User program at ENTRY_POINT may change
+        sta     IRQVEC+1	; these vectors.  Just do change before enabling
+        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+        sta     NMIVEC
+        sta     IRQVEC
+	jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+        jsr     INITSER         ; Set up baud rate, parity, etc.
+FIFOCHK	jsr	GETFIFO
+	bcc	FIFOCHK		; If no character, nothing to echo 		
+	jsr	PUTFIFO
+	bra	FIFOCHK
 
-* = $F800
+
 ;\; Waits for a byte to be ready on the USB FIFO and then reads it, returning
 ; the value read in the A register.
 ; Note: Destroys A, flags
@@ -177,22 +194,7 @@ PFXIT:	PLX
 	RTS
 
 
-START   sei                     ; disable interrupts
-        cld                     ; binary mode arithmetic
-        ldx     #$FF            ; Set up the stack pointer
-        txs                     ;       "
-        LDA     #>START      	; Initialiaze the interrupt vectors
-        sta     NMIVEC+1        ; User program at ENTRY_POINT may change
-        sta     IRQVEC+1	; these vectors.  Just do change before enabling
-        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-        sta     NMIVEC
-        sta     IRQVEC
-	jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-        jsr     INITSER         ; Set up baud rate, parity, etc.
-FIFOCHK	jsr	GETFIFO
-	bcc	FIFOCHK		; If no character, nothing to echo 		
-	jsr	PUTFIFO
-	bra	FIFOCHK
+
 
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
 INITVIA	STZ SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
