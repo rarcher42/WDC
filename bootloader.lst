@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L bootloader.lst bootloader.asm
-; Sun Jun 23 11:10:29 2024
+; Sun Jun 23 11:27:25 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -183,7 +183,7 @@
 .f9b0	29 ef		and #$ef	        AND     #$EF
 .f9b2	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
 .f9b5	a2 5d		ldx #$5d	        LDX     #$5D
-.f9b7	20 3a fa	jsr $fa3a	        JSR     WASTETM
+.f9b7	20 9d fa	jsr $fa9d	        JSR     WASTETM
 .f9ba	68		pla		        PLA
 .f9bb	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
 .f9be	a9 20		lda #$20	        lda     #$20
@@ -250,20 +250,71 @@
 .fa33	d0 02		bne $fa37	        bne     PSIX2           ;
 .fa35	e6 01		inc $01		        inc     DPH             ; account for page crossing
 .fa37	6c 00 00	jmp ($0000)	PSIX2   jmp     (DPL)           ; return to byte following final NULL
-.fa3a	da		phx		WASTETM	phx
-.fa3b	a2 00		ldx #$00	        ldx     #$00
-.fa3d					loop_256_times:
-.fa3d	ca		dex		        dex
-.fa3e	d0 fd		bne $fa3d	        bne     loop_256_times
-.fa40	fa		plx		        plx
-.fa41	ca		dex		        dex
-.fa42	d0 f6		bne $fa3a	        bne    	WASTETM
-.fa44	60		rts		        rts
-.fa45	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
-.fa48	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
-.fa4b	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
->fffa	48 fa				NMIENT  .word     GONMI
->fffc	4b fa				RSTENT  .word     GORST
->fffe	45 fa				IRQENT  .word     GOIRQ
+.fa3a					Is_VIA_USB_RX_Data_Avail:
+.fa3a	a9 00		lda #$00	        LDA     #$00
+.fa3c	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
+.fa3f	a9 02		lda #$02	        LDA     #$02
+.fa41	2c e0 7f	bit $7fe0	        bit     SYSTEM_VIA_IOB
+.fa44	d0 03		bne $fa49	        bne     not_zero
+.fa46	a9 01		lda #$01	        LDA     #$01
+.fa48	60		rts		        RTS
+.fa49	a9 00		lda #$00	not_zero	LDA     #$00	; It is high, meaning there is no data available to read.
+.fa4b	60		rts		        	RTS
+.fa4c					Sys_VIA_USB_Char_RX:
+.fa4c	a9 00		lda #$00	        lda     #$00
+.fa4e	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
+.fa51	a9 02		lda #$02	        LDA     #$02
+.fa53	2c e0 7f	bit $7fe0	WFRXBL		bit     SYSTEM_VIA_IOB
+.fa56	d0 fb		bne $fa53	       	 	BNE     WFRXBL
+.fa58	ad e0 7f	lda $7fe0	        lda     SYSTEM_VIA_IOB
+.fa5b	09 08		ora #$08	        ora     #$08    ; Save a copy of port B with PB3 set high.
+.fa5d	aa		tax		        tax     ; This will be used later.
+.fa5e	29 f7		and #$f7	        and     #$F7
+.fa60	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
+.fa63	ea		nop		        nop
+.fa64	ea		nop		        nop
+.fa65	ea		nop		        nop
+.fa66	ea		nop		        NOP
+.fa67	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
+.fa6a	8e e0 7f	stx $7fe0	        stx     SYSTEM_VIA_IOB
+.fa6d	60		rts		        RTS
+.fa6e	a9 ee		lda #$ee	        lda     #$EE
+.fa70	60		rts		        rts
+.fa71	9c e3 7f	stz $7fe3	SendFIFO	STZ     SYSTEM_VIA_DDRA		; Set all bits on port A to inputs.
+.fa74	8d e1 7f	sta $7fe1	       		 STA     SYSTEM_VIA_IOA
+.fa77	a9 01		lda #$01	        	LDA     #$01
+.fa79	2c e0 7f	bit $7fe0	WFTXEBL		bit     SYSTEM_VIA_IOB
+.fa7c	d0 fb		bne $fa79	        	BNE     WFTXEBL
+.fa7e	ad e0 7f	lda $7fe0	        	lda     SYSTEM_VIA_IOB
+.fa81	29 fb		and #$fb	        	AND     #$FB	; Save a copy of port B with PB2 low.
+.fa83	aa		tax		        	TAX
+.fa84	09 04		ora #$04	        	ora     #$04	; Set PB2 high.
+.fa86	8d e0 7f	sta $7fe0	        	STA     SYSTEM_VIA_IOB
+.fa89	a9 ff		lda #$ff	        lda     #$FF
+.fa8b	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
+.fa8e	ea		nop		        NOP
+.fa8f	ea		nop		        NOP
+.fa90	8e e0 7f	stx $7fe0	        STX     SYSTEM_VIA_IOB
+.fa93	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
+.fa96	a2 00		ldx #$00	        ldx     #$00
+.fa98	8e e3 7f	stx $7fe3	        STX     SYSTEM_VIA_DDRA
+.fa9b	60		rts		        rts
+.fa9c					Do_Nothing_Subroutine_1:
+.fa9c	60		rts		        rts
+.fa9d	da		phx		WASTETM	phx
+.fa9e	a2 00		ldx #$00	        ldx     #$00
+.faa0					loop_256_times:
+.faa0	ca		dex		        dex
+.faa1	d0 fd		bne $faa0	        bne     loop_256_times
+.faa3	fa		plx		        plx
+.faa4	ca		dex		        dex
+.faa5	d0 f6		bne $fa9d	        bne    	WASTETM
+.faa7	60		rts		        rts
+.faa8	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
+.faab	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
+.faae	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
+>fffa	ab fa				NMIENT  .word     GONMI
+>fffc	ae fa				RSTENT  .word     GORST
+>fffe	a8 fa				IRQENT  .word     GOIRQ
 
 ;******  End of listing
