@@ -32,7 +32,7 @@
 	FIFO_VIA_BASE = $7FE0	; TIDE VIA
 	IORB	= 	FIFO_VIA_BASE + 0
 	IORA	= 	FIFO_VIA_BASE + 1
-	DDRB	=	FIFO_VIA_BASE + 2	; PB bitmap: 0=input 1=output
+	DDRB	=	FIFO_VIA_BASE + 2	; PB bitmap: 0=input 1git =output
 	DDRA 	=	FIFO_VIA_BASE + 3	; PA bitmap: 0=input 1=output
 	T1CL	=	FIFO_VIA_BASE + 4
 	T1CH	=	FIFO_VIA_BASE + 5
