@@ -1,4 +1,11 @@
-
+;
+; FIXME:  Lots of stye mismatch and format ugliness due to merging different code.
+;	For now, leave it be so it's obvious what is new and old code.
+;	Do a clean-up once there's some confidence in the new parts\\
+;
+;	Also, re-write code directy from WDCmon in case there are copyright issues.
+;	It's all very straightforward code because no sense in importing the nonsense.
+;
 ;Intel HEX File Downloader
 ; R. Archer 6/2024
 ;This program is freeware. Use it, modify it, ridicule it in public, or whatever, so long as authorship credit (blame?) is given somewhere to me for the base program.
@@ -76,7 +83,7 @@ START   sei                     ; disable interrupts
         lda     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         sta     NMIVEC
         sta     IRQVEC
-	jsr	Initialize_System_VIA
+	jsr	Initialize_System_VIA	; Set up 65C22 to FIFO interface chip (and ROM bank select)
         jsr     INITSER         ; Set up baud rate, parity, etc.
         ; Download Intel hex.  The program you download MUST have its entry
         ; instruction (even if only a jump to somewhere else) at ENTRY_POINT.
@@ -84,7 +91,7 @@ HEXDNLD lda     #0
         sta     DLFAIL          ;Start by assuming no D/L failure
         jsr     PUTSTRI
         .text   13,10,13,10
-        .text   "Send 6502 code in"
+        .text   "Send 65C02/65C816 code in"
         .text   " Intel Hex format"
         .text  " at 19200,n,8,1 ->"
         .text   13,10
@@ -327,6 +334,125 @@ PSIX1   inc     DPL             ;
         inc     DPH             ; account for page crossing
 PSIX2   jmp     (DPL)           ; return to byte following final NULL
 ;
+
+; Returns 1 in A if there is data available to be read, 0 if not.
+Is_VIA_USB_RX_Data_Avail:
+
+        ; Set all bits on port A to inputs.
+        LDA     #$00
+        STA     SYSTEM_VIA_DDRA
+
+        ; See if PB1 (TUSB_RXFB) is high.
+        LDA     #$02
+        bit     SYSTEM_VIA_IOB
+        bne     not_zero
+
+        ; It is low, meaning there is data available to read.
+        LDA     #$01
+        RTS
+
+not_zero	LDA     #$00	; It is high, meaning there is no data available to read.
+        	RTS
+
+; Waits for a byte to be ready on the USB FIFO and then reads it, returning
+; the value read in the A register.
+Sys_VIA_USB_Char_RX:
+        ; Set all bits on port A to inputs.
+        lda     #$00
+        STA     SYSTEM_VIA_DDRA
+
+        ; Set up to test PB1 (TUSB_RXFB).
+        LDA     #$02
+
+        ; Wait for PB1 (TUSB_RXFB) to be low. This indicates data can be
+        ; read from the FIFO by strobing PB3 low then high again.
+WFRXBL		bit     SYSTEM_VIA_IOB
+       	 	BNE     WFRXBL
+
+        ; Perform a read-modify-write on port B, clearing PB3 (TUSB_RDB).
+        ; This triggers the FIFO to drive the received byte on port A.
+        lda     SYSTEM_VIA_IOB
+        ora     #$08    ; Save a copy of port B with PB3 set high.
+        tax     ; This will be used later.
+        and     #$F7
+        STA     SYSTEM_VIA_IOB
+
+        ; Wait for the FIFO to drive the data and the lines to settle
+        ; (between 20ns and 50ns, according to the datasheet).
+        nop
+        nop
+        nop
+        NOP
+
+        ; Read the data byte from the FIFO on port A.
+        LDA     SYSTEM_VIA_IOA
+
+        ; Restore the original value of port B, while setting PB3 high again.
+        stx     SYSTEM_VIA_IOB
+
+        ; We're done. The byte read is in A.
+        RTS
+
+        ; Apparently unused code.
+        lda     #$EE
+        rts
+
+; The different case styles are deliberate but intended to be temporary.
+; Makes "new"/FIFO code obvious until it's debugged. Normalize style after integrated.
+;
+; Sends the byte stored in A to the debugger, waiting until it can be sent.
+SendFIFO	STZ     SYSTEM_VIA_DDRA		; Set all bits on port A to inputs.
+
+        	; Write register A to port A. This has no effect on the actual
+        	; output pin until port A is set as an output.
+       		 STA     SYSTEM_VIA_IOA
+
+        	; Set up register A to test port B, bit 0 (TUSB_TXEB).
+        	LDA     #$01
+
+        	; Wait for PB0 (TUSB_TXEB) to be low. This indicates data can be
+        	; written to the FIFO by strobing PB2 (TUSB_WR) high then low.
+WFTXEBL		bit     SYSTEM_VIA_IOB
+        	BNE     WFTXEBL
+
+        	; Perform a read-modify-write on port B, setting bit 2 (TUSB_WR).
+        	; Save the original value in X temporarily.
+        	lda     SYSTEM_VIA_IOB
+        	AND     #$FB	; Save a copy of port B with PB2 low.
+        	TAX
+        	ora     #$04	; Set PB2 high.
+        	STA     SYSTEM_VIA_IOB
+
+        ; Set all bits on port A to outputs. This causes the pin outputs
+        ; to be set to what we wrote to port A earlier in the subroutine.
+        lda     #$FF
+        STA     SYSTEM_VIA_DDRA
+
+        ; Wait for the port A outputs to settle. The datasheet says this
+        ; must be held at least 20 ns before PB2 (TUSB_WR) is brought low.
+        NOP
+        NOP
+
+        ; Write the original port B value back, setting PB2 back to low.
+        STX     SYSTEM_VIA_IOB
+
+        ; Read port A. But why? The values read should be the actual
+        ; values driven on the pins, which may not be what we commanded
+        ; them to if, for example, they are heavily loaded. This value
+        ; is returned in the A register, and could be examined by the
+        ; caller. But this is not used anywhere in the monitor.
+        LDA     SYSTEM_VIA_IOA
+
+        ; Set all bits in port A as inputs.
+        ldx     #$00
+        STX     SYSTEM_VIA_DDRA
+
+        ; All done.
+        rts
+
+; A subroutine which does absolutely nothing.
+Do_Nothing_Subroutine_1:
+        rts
 
 ; Delays by looping 256*X times.
 WASTETM	phx
