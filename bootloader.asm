@@ -83,8 +83,11 @@ START   sei                     ; disable interrupts
         lda     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         sta     NMIVEC
         sta     IRQVEC
-	jsr	Initialize_System_VIA	; Set up 65C22 to FIFO interface chip (and ROM bank select)
+	jsr	INITVIA	; Set up 65C22 to FIFO interface chip (and ROM bank select)
         jsr     INITSER         ; Set up baud rate, parity, etc.
+FIFOLB	jsr	GETFIFO
+	jsr	PUTFIFO
+	bra	FIFOLB
         ; Download Intel hex.  The program you download MUST have its entry
         ; instruction (even if only a jump to somewhere else) at ENTRY_POINT.
 HEXDNLD lda     #0
@@ -200,18 +203,14 @@ INITSER lda     #SCTL_V 	; Set baud rate 'n stuff
 
 
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
-Initialize_System_VIA:
-        ; Disable PB7, shift register, timer T1 interrupt.
-        lda     #$00
-        STA     SYSTEM_VIA_ACR
+INITVIA	STZ     SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
 
         ; Cx1/Cx2 as inputs with negative active edge, for both ports. These
         ; aren't used for the system VIA debugging interface, but the Cx2
         ; lines are connected to the FLASH, and they select the bank. Setting
         ; them as inputs allows the pullups to automatically select the bank
         ; which contains the factory-programmed FLASH bank with the monitor.
-        lda     #$00
-        STA     SYSTEM_VIA_PCR
+        STZ     SYSTEM_VIA_PCR
 
        
         ; Preset port B output for $18 (TUSB_RDB and PB4-not-connected high).
@@ -229,8 +228,7 @@ Initialize_System_VIA:
         lda     #$1C
         STA     SYSTEM_VIA_DDRB
         ; Set all IO on port A to inputs.
-        LDA     #$00
-        STA     SYSTEM_VIA_DDRA
+        STZ     SYSTEM_VIA_DDRA
 
         ; Read port B (USB status and control lines) and save it on the stack.
         lda     SYSTEM_VIA_IOB
@@ -253,8 +251,9 @@ Initialize_System_VIA:
 
         ; Wait until PB5 (TUSB_PWRENB) goes low, indicating it's powered up.
         lda     #$20
-wfpwr:  bit     SYSTEM_VIA_IOB
-        BNE     wfpwr
+WFPWRBIT    
+	LDA	SYSTEM_VIA_IOB
+        BNE     WFPWRBIT
         RTS
 ;
 ;
@@ -351,14 +350,16 @@ Is_VIA_USB_RX_Data_Avail:
         LDA     #$01
         RTS
 
-not_zero	LDA     #$00	; It is high, meaning there is no data available to read.
-        	RTS
+not_zero	
+	LDA     #$00	; It is high, meaning there is no data available to read.
+        RTS
 
 ; Waits for a byte to be ready on the USB FIFO and then reads it, returning
 ; the value read in the A register.
-Sys_VIA_USB_Char_RX:
+
         ; Set all bits on port A to inputs.
-        lda     #$00
+GETFIFO 	
+	lda     #$00
         STA     SYSTEM_VIA_DDRA
 
         ; Set up to test PB1 (TUSB_RXFB).
@@ -366,8 +367,8 @@ Sys_VIA_USB_Char_RX:
 
         ; Wait for PB1 (TUSB_RXFB) to be low. This indicates data can be
         ; read from the FIFO by strobing PB3 low then high again.
-WFRXBL		bit     SYSTEM_VIA_IOB
-       	 	BNE     WFRXBL
+WFRXBL	bit     SYSTEM_VIA_IOB
+       	BNE     WFRXBL
 
         ; Perform a read-modify-write on port B, clearing PB3 (TUSB_RDB).
         ; This triggers the FIFO to drive the received byte on port A.
@@ -401,27 +402,29 @@ WFRXBL		bit     SYSTEM_VIA_IOB
 ; Makes "new"/FIFO code obvious until it's debugged. Normalize style after integrated.
 ;
 ; Sends the byte stored in A to the debugger, waiting until it can be sent.
-SendFIFO	STZ     SYSTEM_VIA_DDRA		; Set all bits on port A to inputs.
+PUTFIFO		
+	STZ     SYSTEM_VIA_DDRA		; Set all bits on port A to inputs.
 
-        	; Write register A to port A. This has no effect on the actual
-        	; output pin until port A is set as an output.
-       		 STA     SYSTEM_VIA_IOA
+        ; Write register A to port A. This has no effect on the actual
+        ; output pin until port A is set as an output.
+       	STA     SYSTEM_VIA_IOA
 
-        	; Set up register A to test port B, bit 0 (TUSB_TXEB).
-        	LDA     #$01
+        ; Set up register A to test port B, bit 0 (TUSB_TXEB).
+        LDA     #$01
 
-        	; Wait for PB0 (TUSB_TXEB) to be low. This indicates data can be
-        	; written to the FIFO by strobing PB2 (TUSB_WR) high then low.
-WFTXEBL		bit     SYSTEM_VIA_IOB
-        	BNE     WFTXEBL
+        ; Wait for PB0 (TUSB_TXEB) to be low. This indicates data can be
+        ; written to the FIFO by strobing PB2 (TUSB_WR) high then low.
+WFTXEBL		
+	bit     SYSTEM_VIA_IOB
+        BNE     WFTXEBL
 
-        	; Perform a read-modify-write on port B, setting bit 2 (TUSB_WR).
-        	; Save the original value in X temporarily.
-        	lda     SYSTEM_VIA_IOB
-        	AND     #$FB	; Save a copy of port B with PB2 low.
-        	TAX
-        	ora     #$04	; Set PB2 high.
-        	STA     SYSTEM_VIA_IOB
+        ; Perform a read-modify-write on port B, setting bit 2 (TUSB_WR).
+        ; Save the original value in X temporarily.
+        lda     SYSTEM_VIA_IOB
+        AND     #$FB	; Save a copy of port B with PB2 low.
+        TAX
+        ora     #$04	; Set PB2 high.
+        STA     SYSTEM_VIA_IOB
 
         ; Set all bits on port A to outputs. This causes the pin outputs
         ; to be set to what we wrote to port A earlier in the subroutine.
