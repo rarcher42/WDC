@@ -27,12 +27,12 @@
 ;
 ; 6551 ACIA equates for serial I/O
 ;
-	ACIA_BASE= $F000	        ; This is where the 6551 ACIA starts
-	SDR = ACIA_BASE       ; RX'ed bytes read, TX bytes written, here
-	SSR = ACIA_BASE+1     ; Serial data status register. A write here
+	ACIA_BASE= $7F30	; This is where the 6551 ACIA starts
+	SDR = ACIA_BASE       	; RX'ed bytes read, TX bytes written, here
+	SSR = ACIA_BASE+1     	; Serial data status register. A write here
                                 ; causes a programmed reset.
-	SCMD = ACIA_BASE+2     ; Serial command reg. ()
-	SCTL = ACIA_BASE+3     ; Serial control reg. ()
+	SCMD = ACIA_BASE+2     	; Serial command reg. ()
+	SCTL = ACIA_BASE+3     	; Serial control reg. ()
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
 ; to run 19200 baud, no parity, 8 data bits, 1 stop bit.  Period.  For now.
