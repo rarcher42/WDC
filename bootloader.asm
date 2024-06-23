@@ -19,12 +19,35 @@
 ;    If the user program uses NMI or IRQs, it is responsible for writing the RAM "shadow" vectors at RUN-TIME prior to enabling interrupts. This is because the hex monitor initializes them to a "sane" values pointing into the ROM monitor on every reset, so recovery from user program crashes is always possible.
 ;    A lot of nice things are missing. For example, no timeouts are provided since that would require support of additional timer hardware. It seems that if a download halts, pressing the big red RESET button is the right thing to do anyways. :) This is minimal bootstrap. It does the job needed and little more. 
 
-; ($7EFB, $7EFA):	NMI RAM vector
-; ($7EFF, $7EFE):       IRQ RAM vector
+; ($7FEB, $7FEA):	NMI RAM vector
+; ($7FEF, $7FEE):       IRQ RAM vector
 ; (User program may not set a new RESET vector, or we could load
 ; an unrecoverable program into SRAM if battery backed, which would
 ; kill the system until the RAM was removed!)
 ;
+;
+; TIDE2VIA
+;
+;	
+	FIFO_VIA_BASE = $7FE0	; TIDE VIA
+	IORB	= 	FIFO_VIA_BASE + 0
+	IORA	= 	FIFO_VIA_BASE + 1
+	DDRB	=	FIFO_VIA_BASE + 2	; PB bitmap: 0=input 1=output
+	DDRA 	=	FIFO_VIA_BASE + 3	; PA bitmap: 0=input 1=output
+	T1CL	=	FIFO_VIA_BASE + 4
+	T1CH	=	FIFO_VIA_BASE + 5
+	T1LL	=	FIFO_VIA_BASE + 6
+	T1LH	=	FIFO_VIA_BASE + 7	
+	T2CL	=	FIFO_VIA_BASE + 8
+	T2CH	=	FIFO_VIA_BASE + 9
+	SR	=	FIFO_VIA_BASE + 10
+	ACR 	=	FIFO_VIA_BASE + 11
+	PCR	=	FIFO_VIA_BASE + 12
+	IFR	=	FIFO_VIA_BASE + 13
+	IER	=	FIFO_VIA_BASE + 14
+	IORA_NH	=	FIFO_VIA_BASE + 15
+
+
 ; 6551 ACIA equates for serial I/O
 ;
 	ACIA_BASE= $7F30	; This is where the 6551 ACIA starts
