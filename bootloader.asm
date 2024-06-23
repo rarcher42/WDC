@@ -39,37 +39,37 @@ SYSTEM_VIA_ORA_IRA         = $7FEF ; Port A IO register, but no handshake
 
 ; 6551 ACIA equates for serial I/O
 ;
-	ACIA_BASE= $7F30	; This is where the 6551 ACIA starts
-	SDR = ACIA_BASE       	; RX'ed bytes read, TX bytes written, here
-	SSR = ACIA_BASE+1     	; Serial data status register. A write here
+ACIA_BASE= $7F30	; This is where the 6551 ACIA starts
+SDR = ACIA_BASE       	; RX'ed bytes read, TX bytes written, here
+SSR = ACIA_BASE+1     	; Serial data status register. A write here
                                 ; causes a programmed reset.
-	SCMD = ACIA_BASE+2     	; Serial command reg. ()
-	SCTL = ACIA_BASE+3     	; Serial control reg. ()
+SCMD = ACIA_BASE+2     	; Serial command reg. ()
+SCTL = ACIA_BASE+3     	; Serial control reg. ()
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
 ; to run 19200 baud, no parity, 8 data bits, 1 stop bit.  Period.  For now.
 ;
-	SCTL_V  = %00011111       ; 1 stop, 8 bits, 19200 baud
-	SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ, DTR*
-	TX_RDY  = %00010000       ; AND mask for transmitter ready
-	RX_RDY  = %00001000       ; AND mask for receiver buffer full
+SCTL_V  = %00011111       ; 1 stop, 8 bits, 19200 baud
+SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ, DTR*
+TX_RDY  = %00010000       ; AND mask for transmitter ready
+RX_RDY  = %00001000       ; AND mask for receiver buffer full
 ;
 ; Zero-page storage
-	DPL =            $00     ; data pointer (two bytes)
-	DPH  =           $01     ; high of data pointer
-	RECLEN  =        $02     ; record length in bytes
-	START_LO  =      $03
-	START_HI =       $04
-	RECTYPE =        $05
-	CHKSUM =         $06     ; record checksum accumulator
-	DLFAIL=          $07     ; flag for download failure
-	TEMP =          $08     ; save hex value
+DPL =            $00     ; data pointer (two bytes)
+DPH  =           $01     ; high of data pointer
+RECLEN  =        $02     ; record length in bytes
+START_LO  =      $03
+START_HI =       $04
+RECTYPE =        $05
+CHKSUM =         $06     ; record checksum accumulator
+DLFAIL=          $07     ; flag for download failure
+TEMP =          $08     ; save hex value
 
 ; "Shadow" RAM vectors (note each is $8000 below the actual ROM vector)
-	NMIVEC	= 	 $7EFA	; write actual NMI vector here
-	IRQVEC   =       $7EFE   ; write IRQ vector here
+NMIVEC	= 	 $7EFA	; write actual NMI vector here
+IRQVEC   =       $7EFE   ; write IRQ vector here
 
-	ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
+ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 
 * = $F800
 ;
@@ -85,9 +85,11 @@ START   sei                     ; disable interrupts
         sta     IRQVEC
 	jsr	INITVIA	; Set up 65C22 to FIFO interface chip (and ROM bank select)
         jsr     INITSER         ; Set up baud rate, parity, etc.
-FIFOLB	jsr	GETFIFO
+FIFOCHK	jsr	GETFIFO
+	bcc	FIFOCHK		; If no character, nothing to echo 		
+FIFO_OUT
 	jsr	PUTFIFO
-	bra	FIFOLB
+	bra	FIFOCHK
         ; Download Intel hex.  The program you download MUST have its entry
         ; instruction (even if only a jump to somewhere else) at ENTRY_POINT.
 HEXDNLD lda     #0
@@ -356,23 +358,26 @@ not_zero
 
 ; Waits for a byte to be ready on the USB FIFO and then reads it, returning
 ; the value read in the A register.
-
-        ; Set all bits on port A to inputs.
-GETFIFO 	
-	lda     #$00
-        STA     SYSTEM_VIA_DDRA
-
+; Note: Destroys A, flags
+; 
+; On exit:
+; If C==1 then A contains the next FIFO byte
+; If C==0 then there was nothing waiting and A is not guaranteed to mean anything
+;
+GETFIFO	PHX				; Save X
+	STZ     SYSTEM_VIA_DDRA		; D0-D7 from FIFO --> CPU (00 = make all port A pins inputs)
         ; Set up to test PB1 (TUSB_RXFB).
         LDA     #$02
-
         ; Wait for PB1 (TUSB_RXFB) to be low. This indicates data can be
         ; read from the FIFO by strobing PB3 low then high again.
-WFRXBL	bit     SYSTEM_VIA_IOB
-       	BNE     WFRXBL
-
+	BIT     SYSTEM_VIA_IOB	; AND with b1 to see if RXF is low (character awaiting read) or RXF=1 (no data waiting)
+       	BEQ     GFRD		; 0 = FIFO has a character, so read it in
+	; No character waiting.  Exit with carry clear and A=??
+	CLC			; carry clear means nothing is waiting
+	BRA GFXIT		; And return with carry clear because is waiting
         ; Perform a read-modify-write on port B, clearing PB3 (TUSB_RDB).
         ; This triggers the FIFO to drive the received byte on port A.
-        lda     SYSTEM_VIA_IOB
+GFRD: 	lda     SYSTEM_VIA_IOB
         ora     #$08    ; Save a copy of port B with PB3 set high.
         tax     ; This will be used later.
         and     #$F7
@@ -380,23 +385,20 @@ WFRXBL	bit     SYSTEM_VIA_IOB
 
         ; Wait for the FIFO to drive the data and the lines to settle
         ; (between 20ns and 50ns, according to the datasheet).
-        nop
-        nop
-        nop
+        nop	; FIXME: This is some dumb bullshift. That's ONE machine cycle.  
+	; At 2 cycles per instruction at most one NOP should be required to accomplish the above comment.  
+        nop	; FIXME: Will retain for now in case it's papering over some other problem that the original firmware is working around.	
+        nop	
         NOP
 
         ; Read the data byte from the FIFO on port A.
-        LDA     SYSTEM_VIA_IOA
+        LDA     SYSTEM_VIA_IOA		
 
         ; Restore the original value of port B, while setting PB3 high again.
         stx     SYSTEM_VIA_IOB
-
-        ; We're done. The byte read is in A.
-        RTS
-
-        ; Apparently unused code.
-        lda     #$EE
-        rts
+	SEC		; Signal that a valid character is waiting
+GFXIT	PLX		; Restore X as it was used in routine
+	RTS
 
 ; The different case styles are deliberate but intended to be temporary.
 ; Makes "new"/FIFO code obvious until it's debugged. Normalize style after integrated.
