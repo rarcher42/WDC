@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
-; 64tass -o bootloader -L bootloader.lst bootloader.asm
-; Sun Jun 23 01:23:59 2024
+; 64tass.exe -c -L bootloader.lst bootloader.asm
+; Sun Jun 23 10:00:22 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -25,19 +25,19 @@
 =$06						CHKSUM =         $06     ; record checksum accumulator
 =$07						DLFAIL=          $07     ; flag for download failure
 =$08						TEMP =          $08     ; save hex value
-=$7fea						NMIVEC	= 	$7FEA	; write actual NMI vector here
-=$7fee						IRQVEC   =       $7FEE   ; write IRQ vector here
+=$7efa						NMIVEC	= 	 $7EFA	; write actual NMI vector here
+=$7efe						IRQVEC   =       $7EFE   ; write IRQ vector here
 =$2000						ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 .f800	78		sei		START   sei                     ; disable interrupts
 .f801	d8		cld		        cld                     ; binary mode arithmetic
 .f802	a2 ff		ldx #$ff	        ldx     #$FF            ; Set up the stack pointer
 .f804	9a		txs		        txs                     ;       "
 .f805	a9 f8		lda #$f8	        lda     #>START      ; Initialiaze the interrupt vectors
-.f807	8d eb 7f	sta $7feb	        sta     NMIVEC+1        ; User program at ENTRY_POINT may change
-.f80a	8d ef 7f	sta $7fef	        sta     IRQVEC+1	; these vectors.  Just do change before enabling
+.f807	8d fb 7e	sta $7efb	        sta     NMIVEC+1        ; User program at ENTRY_POINT may change
+.f80a	8d ff 7e	sta $7eff	        sta     IRQVEC+1	; these vectors.  Just do change before enabling
 .f80d	a9 00		lda #$00	        lda     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-.f80f	8d ea 7f	sta $7fea	        sta     NMIVEC
-.f812	8d ee 7f	sta $7fee	        sta     IRQVEC
+.f80f	8d fa 7e	sta $7efa	        sta     NMIVEC
+.f812	8d fe 7e	sta $7efe	        sta     IRQVEC
 .f815	20 85 f9	jsr $f985	        jsr     INITSER         ; Set up baud rate, parity, etc.
 .f818	a9 00		lda #$00	HEXDNLD lda     #0
 .f81a	85 07		sta $07		        sta     DLFAIL          ;Start by assuming no D/L failure
@@ -210,8 +210,8 @@
 .f9fd	d0 02		bne $fa01	        bne     PSIX2           ;
 .f9ff	e6 01		inc $01		        inc     DPH             ; account for page crossing
 .fa01	6c 00 00	jmp ($0000)	PSIX2   jmp     (DPL)           ; return to byte following final NULL
-.fa04	6c ee 7f	jmp ($7fee)	GOIRQ	jmp	(IRQVEC)
-.fa07	6c ea 7f	jmp ($7fea)	GONMI	jmp	(NMIVEC)
+.fa04	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
+.fa07	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
 .fa0a	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
 >fffa	07 fa				NMIENT  .word     GONMI
 >fffc	0a fa				RSTENT  .word     GORST
