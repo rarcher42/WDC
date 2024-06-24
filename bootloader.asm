@@ -73,6 +73,17 @@ TEMP =          $08     ; save hex value
 NMIVEC	= 	 $7EFA	; write actual NMI vector here
 IRQVEC   =       $7EFE   ; write IRQ vector here
 
+; Lazy stuff
+MASK0	=	 %00000001
+MASK1	=	 %00000010
+MASK2	=	 %00000100
+MASK3	=	 %00001000
+MASK4	=	 %00010000
+MASK5	=	 %00100000
+MASK6	=	 %01000000
+MASK7	=	 %10000000
+
+
 ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 *= $F800
 START   sei                     ; disable interrupts
@@ -86,12 +97,22 @@ START   sei                     ; disable interrupts
         sta     NMIVEC
         sta     IRQVEC
 	jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-        jsr     INITSER         ; Set up baud rate, parity, etc.
+        
+SPAMLOOP
+	sta	$4000		; ram for CS LED side effect
+	lda 	#'*'
+	jsr 	OUTFIFO
+	LDY	#$80
+	jsr	WASTETM
+	bra	SPAMLOOP
+
+
+
 FIFOCHK	jsr	GETFIFO
 	bcc	FIFOCHK		; If no character, nothing to echo 		
 	jsr	PUTFIFO
 	bra	FIFOCHK
-
+	; jsr     INITSER         ; Set up baud rate, parity, etc.
 
 ;\; Waits for a byte to be ready on the USB FIFO and then reads it, returning
 ; the value read in the A register.
@@ -137,7 +158,7 @@ GFRD: 	LDA     SYSTEM_VIA_IOB
 GFXIT	PLX		; Restore X as it was used in routine
 	RTS
 
-; Call with A = character byte to sned
+; Call with A = character byte to send
 ; Returns with carry set if successfully queued
 ; Returns with carry clear if FIFO back to PC is full and would fail.
 PUTFIFO	
@@ -197,67 +218,63 @@ PFXIT:	PLX
 
 
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
-INITVIA	STZ SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
-
-        ; Cx1/Cx2 as inputs with negative active edge, for both ports. These
-        ; aren't used for the system VIA debugging interface, but the Cx2
-        ; lines are connected to the FLASH, and they select the bank. Setting
-        ; them as inputs allows the pullups to automatically select the bank
-        ; which contains the factory-programmed FLASH bank with the monitor.
-        STZ     SYSTEM_VIA_PCR
-
-       
-        ; Preset port B output for $18 (TUSB_RDB and PB4-not-connected high).
-        LDA     #$18
-        STA     SYSTEM_VIA_IOB
-
-        ; Set PB2 (TUSB_WR), PB3 (TUSB_RDB), and PB4 (N.C.) as outputs. This
-        ; has the effect of writing $FF to the USB FIFO when the RESET button
-        ; is pressed. When RESET is pressed, it causes the system VIA to output
-        ; high on TUSB_WR, then when this write sets TUSB_WR low, the high-to-
-        ; low transition on TUSB_WR triggers a write to the USB FIFO. At this
-        ; point, port A (the USB FIFO data lines) are not being driven, and
-        ; either float high, or are pulled high internally, because this
-        ; triggers a write of $FF to the USB FIFO.
-        LDA     #$1C
-        STA     SYSTEM_VIA_DDRB
-        ; Set all IO on port A to inputs.
-        STZ     SYSTEM_VIA_DDRA
-
-        ; Read port B (USB status and control lines) and save it on the stack.
-        LDA     SYSTEM_VIA_IOB
-        PHA
-
-        ; Mask out BIT 4, which is not connected.
-        AND     #$EF
-
-        ; Write the result back. Not sure why since only BIT 4 changes, and
-        ; it is not connected (according to schematic rev. C, Dec. 15, 2020).
-        STA     SYSTEM_VIA_IOB
-
-        ; Delay for $5D*256 loop cycles.
-        LDX     #$5D
-        JSR     WASTETM
-
-        ; Pull the original port B value, and write it back to the port.
-        PLA
-        STA     SYSTEM_VIA_IOB
-
-        ; Wait until PB5 (TUSB_PWRENB) goes low, indicating it's powered up.
-        LDA     #$20
-WFPWRBIT    
-	LDA	SYSTEM_VIA_IOB
-        BNE     WFPWRBIT
+INITVIA
+	STZ 	SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
+	STZ     SYSTEM_VIA_PCR	; Make sure CB2 floats so it doesn't interfere with flash bank#
+	STZ	SYSTEM_VIA_DDRA	; All inputs PA0-PA7 (but we can write to output reg.)
+	LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+	STA	SYSTEM_VIA_DDRB	
+	; Wait for FTDI chip to be initialized (PWRENB is 0)
+	; FIXME: add timeout
+WAIT245	LDA	SYSTEM_VIA_IOB
+	AND	#MASK5			; PB5 = PWRENB. 0=enabled 1=disabled
+	BNE	WAIT245	
         RTS
 ;
 
+; Raw FIFO output.  Use with caution as there's no flow control.  This works as long as 
+; the FIFO has room.  Check that before calling this function.
+OUTFIFO	STA	TEMP			; save output character
+	STZ	SYSTEM_VIA_DDRA		; Make Port A an input (for the moment)
+	LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+	STA	SYSTEM_VIA_DDRB	
+	LDA	#(MASK3 + MASK2)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+	STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
+	NOP
+	NOP
+	NOP
+	
+	LDA	#$FF			; make Port A all outputs
+	STA	SYSTEM_VIA_DDRA		; Now the output latches are on FIFO bus
+	LDA	TEMP
+	STA	SYSTEM_VIA_IOA		; Write output value to output latches 
+	NOP
+	NOP
+	NOP
+	NOP				; excessive settle time.  FIMXE, probably at most 1 req'd
+	; Now the data's stable on PA0-7, pull WR line low (leave RD high)
+	LDA	#(MASK3)		; RD=1 WR=0
+	STA	SYSTEM_VIA_IOB		; Low-going WR pulse should latch data
+	NOP
+	NOP
+	NOP
+	NOP
+	LDA	#(MASK3 + MASK2)
+	STA	SYSTEM_VIA_IOB		; return to IDLE state
+	STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+	RTS
+
+
+	
+	 	
 ; Returns 1 in A if there is data available to be read, 0 if not.
 Is_VIA_USB_RX_Data_Avail:
 
         ; Set all BITs on port A to inputs.
         LDA     #$00
         STA     SYSTEM_VIA_DDRA
-
+	LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+	STA	SYSTEM_VIA_DDRB	
         ; See if PB1 (TUSB_RXFB) is high.
         LDA     #$02
         BIT     SYSTEM_VIA_IOB
@@ -276,15 +293,16 @@ not_zero
 Do_Nothing_Subroutine_1:
         rts
 
-; Delays by looping 256*X times.
+; Delays by looping 256*Y times.
 WASTETM	phx
-        ldx     #$00
-loop_256_times:
+WTLOOP  ldx     #$00
+loop_256_times
+	sta 	$4000
         dex
         bne     loop_256_times
-        plx
-        dex
-        bne    	WASTETM
+        dey
+        bne 	WTLOOP
+	plx	   	
         rts
 
 ;

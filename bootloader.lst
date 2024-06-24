@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
-; 64tass -c -L bootloader.lst bootloader.asm
-; Sun Jun 23 15:46:52 2024
+; 64tass -c -L bootloader.lst --intel-hex -o bootloader.hex bootloader.asm
+; Sun Jun 23 18:58:04 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -43,6 +43,14 @@
 =$08					TEMP =          $08     ; save hex value
 =$7efa					NMIVEC	= 	 $7EFA	; write actual NMI vector here
 =$7efe					IRQVEC   =       $7EFE   ; write IRQ vector here
+=$01					MASK0	=	 %00000001
+=$02					MASK1	=	 %00000010
+=$04					MASK2	=	 %00000100
+=$08					MASK3	=	 %00001000
+=$10					MASK4	=	 %00010000
+=$20					MASK5	=	 %00100000
+=$40					MASK6	=	 %01000000
+=$80					MASK7	=	 %10000000
 =$2000					ENTRY_POINT = 	$2000	; where the RAM program MUST have its first instruction
 .f800	78		sei		START   sei                     ; disable interrupts
 .f801	d8		cld		        cld                     ; binary mode arithmetic
@@ -54,277 +62,303 @@
 .f80d	a9 00		lda #$00	        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
 .f80f	8d fa 7e	sta $7efa	        sta     NMIVEC
 .f812	8d fe 7e	sta $7efe	        sta     IRQVEC
-.f815	20 7c f8	jsr $f87c		jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-.f818	20 3c fa	jsr $fa3c	        jsr     INITSER         ; Set up baud rate, parity, etc.
-.f81b	20 25 f8	jsr $f825	FIFOCHK	jsr	GETFIFO
-.f81e	90 fb		bcc $f81b		bcc	FIFOCHK		; If no character, nothing to echo
-.f820	20 4b f8	jsr $f84b		jsr	PUTFIFO
-.f823	80 f6		bra $f81b		bra	FIFOCHK
-.f825	da		phx		GETFIFO	PHX				; Save X
-.f826	9c e3 7f	stz $7fe3		STZ     SYSTEM_VIA_DDRA		; D0-D7 from FIFO --> CPU (00 = make all port A pins inputs)
-.f829	a9 02		lda #$02	        LDA     #$02
-.f82b	2c e0 7f	bit $7fe0		BIT     SYSTEM_VIA_IOB	; AND with b1 to see if RXF is low (character awaiting read) or RXF=1 (no data waiting)
-.f82e	f0 03		beq $f833	       	BEQ     GFRD		; 0 = FIFO has a character, so read it in
-.f830	18		clc			CLC			; carry clear means nothing is waiting
-.f831	80 16		bra $f849		BRA GFXIT		; And return with carry clear because is waiting
-.f833	ad e0 7f	lda $7fe0	GFRD: 	LDA     SYSTEM_VIA_IOB
-.f836	09 08		ora #$08	        ora     #$08    ; Save a copy of port B with PB3 set high.
-.f838	aa		tax		        tax     ; This will be used later.
-.f839	29 f7		and #$f7	        and     #$F7
-.f83b	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
-.f83e	ea		nop		        nop	; FIXME: This is some dumb bullshift. That's ONE machine cycle.
-.f83f	ea		nop		        nop	; FIXME: Will retain for now in case it's papering over some other problem that the original firmware is working around.
-.f840	ea		nop		        nop
-.f841	ea		nop		        NOP
-.f842	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
-.f845	8e e0 7f	stx $7fe0	        stx     SYSTEM_VIA_IOB
-.f848	38		sec			SEC		; Signal that a valid character is waiting
-.f849	fa		plx		GFXIT	PLX		; Restore X as it was used in routine
-.f84a	60		rts			RTS
-.f84b					PUTFIFO
-.f84b	da		phx			PHX		; Save X since it's used here
-.f84c	a9 01		lda #$01	       	LDA     #$01	; Wait for PB0 (TUSB_TXEB) to be low. This indicates FIFO can
-.f84e	2c e0 7f	bit $7fe0		BIT     SYSTEM_VIA_IOB
-.f851	f0 03		beq $f856	        BEQ     PFTXGO
-.f853	18		clc			CLC
-.f854	80 24		bra $f87a		BRA	PFXIT	; FIFO is full; exit with carry clear to signal error to caller
-.f856	9c e3 7f	stz $7fe3	PFTXGO	STZ     SYSTEM_VIA_DDRA		; Set all BITs on port A to inputs.
-.f859	8d e1 7f	sta $7fe1	       	STA     SYSTEM_VIA_IOA
-.f85c	ad e0 7f	lda $7fe0	        LDA     SYSTEM_VIA_IOB
-.f85f	29 fb		and #$fb	        AND     #$FB	; Save a copy of port B with PB2 low.
-.f861	aa		tax		        TAX
-.f862	09 04		ora #$04	        ora     #$04	; Set PB2 high.
-.f864	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
-.f867	a9 ff		lda #$ff	        LDA     #$FF
-.f869	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
-.f86c	ea		nop		        NOP
-.f86d	ea		nop		        NOP
-.f86e	8e e0 7f	stx $7fe0	        STX     SYSTEM_VIA_IOB
-.f871	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
-.f874	a2 00		ldx #$00	        ldx     #$00
-.f876	8e e3 7f	stx $7fe3	        STX     SYSTEM_VIA_DDRA
-.f879	38		sec			SEC					; Character was queued OK
-.f87a	fa		plx		PFXIT:	PLX
-.f87b	60		rts			RTS
-.f87c	9c eb 7f	stz $7feb	INITVIA	STZ SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
-.f87f	9c ec 7f	stz $7fec	        STZ     SYSTEM_VIA_PCR
-.f882	a9 18		lda #$18	        LDA     #$18
-.f884	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
-.f887	a9 1c		lda #$1c	        LDA     #$1C
-.f889	8d e2 7f	sta $7fe2	        STA     SYSTEM_VIA_DDRB
-.f88c	9c e3 7f	stz $7fe3	        STZ     SYSTEM_VIA_DDRA
-.f88f	ad e0 7f	lda $7fe0	        LDA     SYSTEM_VIA_IOB
-.f892	48		pha		        PHA
-.f893	29 ef		and #$ef	        AND     #$EF
-.f895	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
-.f898	a2 5d		ldx #$5d	        LDX     #$5D
-.f89a	20 bc f8	jsr $f8bc	        JSR     WASTETM
-.f89d	68		pla		        PLA
-.f89e	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
-.f8a1	a9 20		lda #$20	        LDA     #$20
-.f8a3					WFPWRBIT
-.f8a3	ad e0 7f	lda $7fe0		LDA	SYSTEM_VIA_IOB
-.f8a6	d0 fb		bne $f8a3	        BNE     WFPWRBIT
-.f8a8	60		rts		        RTS
-.f8a9					Is_VIA_USB_RX_Data_Avail:
-.f8a9	a9 00		lda #$00	        LDA     #$00
-.f8ab	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
-.f8ae	a9 02		lda #$02	        LDA     #$02
-.f8b0	2c e0 7f	bit $7fe0	        BIT     SYSTEM_VIA_IOB
-.f8b3	d0 03		bne $f8b8	        bne     not_zero
-.f8b5	a9 01		lda #$01	        LDA     #$01
-.f8b7	60		rts		        RTS
-.f8b8					not_zero
-.f8b8	a9 00		lda #$00		LDA     #$00	; It is high, meaning there is no data available to read.
-.f8ba	60		rts		        RTS
-.f8bb					Do_Nothing_Subroutine_1:
-.f8bb	60		rts		        rts
-.f8bc	da		phx		WASTETM	phx
-.f8bd	a2 00		ldx #$00	        ldx     #$00
-.f8bf					loop_256_times:
-.f8bf	ca		dex		        dex
-.f8c0	d0 fd		bne $f8bf	        bne     loop_256_times
-.f8c2	fa		plx		        plx
-.f8c3	ca		dex		        dex
-.f8c4	d0 f6		bne $f8bc	        bne    	WASTETM
-.f8c6	60		rts		        rts
-.f8c7	a9 00		lda #$00	HEXDNLD LDA     #0
-.f8c9	85 07		sta $07		        sta     DLFAIL          ;Start by assuming no D/L failure
-.f8cb	20 98 fa	jsr $fa98	        jsr     PUTSTRI
->f8ce	0d 0a 0d 0a			        .text   13,10,13,10
->f8d2	53 65 6e 64 20 36 35 43		        .text   "Send 65C02/65C816 code in"
->f8da	30 32 2f 36 35 43 38 31 36 20 63 6f 64 65 20 69
->f8ea	6e
->f8eb	20 49 6e 74 65 6c 20 48		        .text   " Intel Hex format"
->f8f3	65 78 20 66 6f 72 6d 61 74
->f8fc	20 61 74 20 31 39 32 30		        .text  " at 19200,n,8,1 ->"
->f904	30 2c 6e 2c 38 2c 31 20 2d 3e
->f90e	0d 0a				        .text   13,10
->f910	00					.text	0		; Null-terminate unless you prefer to crash.
-.f911	20 4d fa	jsr $fa4d	HDWRECS jsr     GETSER          ; Wait for start of record mark ':'
-.f914	c9 3a		cmp #$3a	        cmp     #':'
-.f916	d0 f9		bne $f911	        bne     HDWRECS         ; not found yet
-.f918	20 58 fa	jsr $fa58	        jsr     GETHEX          ; Get the record length
-.f91b	85 02		sta $02		        sta     RECLEN          ; save it
-.f91d	85 06		sta $06		        sta     CHKSUM          ; and save first byte of checksum
-.f91f	20 58 fa	jsr $fa58	        jsr     GETHEX          ; Get the high part of start address
-.f922	85 04		sta $04		        sta     START_HI
-.f924	18		clc		        clc
-.f925	65 06		adc $06		        adc     CHKSUM          ; Add in the checksum
-.f927	85 06		sta $06		        sta     CHKSUM          ;
-.f929	20 58 fa	jsr $fa58	        jsr     GETHEX          ; Get the low part of the start address
-.f92c	85 03		sta $03		        sta     START_LO
-.f92e	18		clc		        clc
-.f92f	65 06		adc $06		        adc     CHKSUM
-.f931	85 06		sta $06		        sta     CHKSUM
-.f933	20 58 fa	jsr $fa58	        jsr     GETHEX          ; Get the record type
-.f936	85 05		sta $05		        sta     RECTYPE         ; & save it
-.f938	18		clc		        clc
-.f939	65 06		adc $06		        adc     CHKSUM
-.f93b	85 06		sta $06		        sta     CHKSUM
-.f93d	a5 05		lda $05		        LDA     RECTYPE
-.f93f	d0 2c		bne $f96d	        bne     HDER1           ; end-of-record
-.f941	a6 02		ldx $02		        ldx     RECLEN          ; number of data bytes to write to memory
-.f943	a0 00		ldy #$00	        ldy     #0              ; start offset at 0
-.f945	20 58 fa	jsr $fa58	HDLP1   jsr     GETHEX          ; Get the first/next/last data byte
-.f948	91 03		sta ($03),y	        sta     (START_LO),y    ; Save it to RAM
-.f94a	18		clc		        clc
-.f94b	65 06		adc $06		        adc     CHKSUM
-.f94d	85 06		sta $06		        sta     CHKSUM          ;
-.f94f	c8		iny		        iny                     ; update data pointer
-.f950	ca		dex		        dex                     ; decrement count
-.f951	d0 f2		bne $f945	        bne     HDLP1
-.f953	20 58 fa	jsr $fa58	        jsr     GETHEX          ; get the checksum
-.f956	18		clc		        clc
-.f957	65 06		adc $06		        adc     CHKSUM
-.f959	d0 08		bne $f963	        bne     HDDLF1          ; If failed, report it
-.f95b	a9 23		lda #$23	        LDA     #'#'            ; Character indicating record OK = '#'
-.f95d	8d 30 7f	sta $7f30	        sta     SDR             ; write it out but don't wait for output
-.f960	4c 11 f9	jmp $f911	        jmp     HDWRECS         ; get next record
-.f963	a9 46		lda #$46	HDDLF1  LDA     #'F'            ; Character indicating record failure = 'F'
-.f965	85 07		sta $07		        sta     DLFAIL          ; download failed if non-zero
-.f967	8d 30 7f	sta $7f30	        sta     SDR             ; write it to transmit buffer register
-.f96a	4c 11 f9	jmp $f911	        jmp     HDWRECS         ; wait for next record start
-.f96d	c9 01		cmp #$01	HDER1   cmp     #1              ; Check for end-of-record type
-.f96f	f0 31		beq $f9a2	        beq     HDER2
-.f971	20 98 fa	jsr $fa98	        jsr     PUTSTRI         ; Warn user of unknown record type
->f974	0d 0a 0d 0a			        .text   13,10,13,10
->f978	55 6e 6b 6e 6f 77 6e 20		        .text   "Unknown record type $"
->f980	72 65 63 6f 72 64 20 74 79 70 65 20 24
->f98d	00					.text	0		; null-terminate unless you prefer to crash!
-.f98e	a5 05		lda $05		        LDA     RECTYPE         ; Get it
-.f990	85 07		sta $07			sta	DLFAIL		; non-zero --> download has failed
-.f992	20 7a fa	jsr $fa7a	        jsr     PUTHEX          ; print it
-.f995	a9 0d		lda #$0d		LDA     #13		; but we'll let it finish so as not to
-.f997	20 8d fa	jsr $fa8d	        jsr     PUTSER		; falsely start a new d/l from existing
-.f99a	a9 0a		lda #$0a	        LDA     #10		; file that may still be coming in for
-.f99c	20 8d fa	jsr $fa8d	        jsr     PUTSER		; quite some time yet.
-.f99f	4c 11 f9	jmp $f911		jmp	HDWRECS
-.f9a2	20 58 fa	jsr $fa58	HDER2   jsr     GETHEX          ; get the checksum
-.f9a5	18		clc		        clc
-.f9a6	65 06		adc $06		        adc     CHKSUM          ; Add previous checksum accumulator value
-.f9a8	f0 21		beq $f9cb	        beq     HDER3           ; checksum = 0 means we're OK!
-.f9aa	20 98 fa	jsr $fa98	        jsr     PUTSTRI         ; Warn user of bad checksum
->f9ad	0d 0a 0d 0a			        .text   13,10,13,10
->f9b1	42 61 64 20 72 65 63 6f		        .text   "Bad record checksum!",13,10
->f9b9	72 64 20 63 68 65 63 6b 73 75 6d 21 0d 0a
->f9c7	00				        .text   0		; Null-terminate or 6502 go bye-bye
-.f9c8	4c 00 f8	jmp $f800	        jmp     START
-.f9cb	a5 07		lda $07		HDER3   LDA     DLFAIL
-.f9cd	f0 27		beq $f9f6	        beq     HDEROK
-.f9cf	20 98 fa	jsr $fa98	        jsr     PUTSTRI
->f9d2	0d 0a 0d 0a			        .text   13,10,13,10
->f9d6	44 6f 77 6e 6c 6f 61 64		        .text   "Download Failed",13,10
->f9de	20 46 61 69 6c 65 64 0d 0a
->f9e7	41 62 6f 72 74 69 6e 67		        .text   "Aborting!",13,10
->f9ef	21 0d 0a
->f9f2	00					.text	0		; null-terminate every string yada yada.
-.f9f3	4c 00 f8	jmp $f800	        jmp     START
-.f9f6	20 98 fa	jsr $fa98	HDEROK  jsr     PUTSTRI
->f9f9	0d 0a 0d 0a			        .text   13,10,13,10
->f9fd	44 6f 77 6e 6c 6f 61 64		        .text   "Download Successful!",13,10
->fa05	20 53 75 63 63 65 73 73 66 75 6c 21 0d 0a
->fa13	4a 75 6d 70 69 6e 67 20		        .text   "Jumping to location $"
->fa1b	74 6f 20 6c 6f 63 61 74 69 6f 6e 20 24
->fa28	00					.text	0			; by now, I figure you know what this is for. :)
-.fa29	a9 20		lda #$20	        LDA	#>ENTRY_POINT		; Print the entry point in hex
-.fa2b	20 7a fa	jsr $fa7a	        jsr	PUTHEX
-.fa2e	a9 00		lda #$00	        LDA	#<ENTRY_POINT
-.fa30	20 7a fa	jsr $fa7a		jsr	PUTHEX
-.fa33	20 98 fa	jsr $fa98	        jsr	PUTSTRI
->fa36	0d 0a				        .text   13,10
->fa38	00				        .text   0		; stop lemming-like march of the program ctr. thru data
-.fa39	4c 00 20	jmp $2000	        jmp     ENTRY_POINT	; jump to canonical entry point
-.fa3c	a9 1f		lda #$1f	INITSER LDA     #SCTL_V 	; Set baud rate 'n stuff
-.fa3e	8d 33 7f	sta $7f33	        sta     SCTL
-.fa41	a9 0b		lda #$0b	        LDA     #SCMD_V 	; set parity, interrupt disable, n'stuff
-.fa43	8d 32 7f	sta $7f32	        sta     SCMD
-.fa46	60		rts		        rts
-.fa47	ad 31 7f	lda $7f31	SERRDY  LDA     SSR     	; look at serial status
-.fa4a	29 08		and #$08	        and     #RX_RDY 	; strip off "character waiting" BIT
-.fa4c	60		rts		        rts             	; if zero, nothing waiting.
-.fa4d	ad 31 7f	lda $7f31	GETSER  LDA     SSR    		; look at serial status
-.fa50	29 08		and #$08	        and     #RX_RDY 	; see if anything is ready
-.fa52	f0 f9		beq $fa4d	        beq     GETSER  	; busy-wait until character comes in!
-.fa54	ad 30 7f	lda $7f30	        LDA     SDR     	; get the character
-.fa57	60		rts		        rts
-.fa58	20 4d fa	jsr $fa4d	GETHEX  jsr     GETSER
-.fa5b	20 6f fa	jsr $fa6f	        jsr     MKNIBL  	; Convert to 0..F numeric
-.fa5e	0a		asl a		        asl     a
-.fa5f	0a		asl a		        asl     a
-.fa60	0a		asl a		        asl     a
-.fa61	0a		asl a		        asl     a       	; This is the upper nibble
-.fa62	29 f0		and #$f0	        and     #$F0
-.fa64	85 08		sta $08		        sta     TEMP
-.fa66	20 4d fa	jsr $fa4d	        jsr     GETSER
-.fa69	20 6f fa	jsr $fa6f	        jsr     MKNIBL
-.fa6c	05 08		ora $08		        ora     TEMP
-.fa6e	60		rts		        rts             	; return with the nibble received
-.fa6f	c9 3a		cmp #$3a	MKNIBL  cmp     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
-.fa71	90 02		bcc $fa75	        bcc     MKNNH   	; If we borrowed, we lost the carry so 0..9
-.fa73	e9 08		sbc #$08	        sbc     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
-.fa75	e9 2f		sbc #$2f	MKNNH   sbc     #'0'-1  	; subtract off '0' (if carry clear coming in)
-.fa77	29 0f		and #$0f	        and     #$0F    	; no upper nibble no matter what
-.fa79	60		rts		        rts             	; and return the nibble
-.fa7a	48		pha		PUTHEX  pha             	;
-.fa7b	4a		lsr a		        lsr a
-.fa7c	4a		lsr a		        lsr a
-.fa7d	4a		lsr a		        lsr a
-.fa7e	4a		lsr a		        lsr a
-.fa7f	20 83 fa	jsr $fa83	        jsr     PRNIBL
-.fa82	68		pla		        pla
-.fa83	29 0f		and #$0f	PRNIBL  and     #$0F    	; strip off the low nibble
-.fa85	c9 0a		cmp #$0a	        cmp     #$0A
-.fa87	90 02		bcc $fa8b	        bcc     NOTHEX  	; if it's 0-9, add '0' else also add 7
-.fa89	69 06		adc #$06	        adc     #6      	; Add 7 (6+carry=1), result will be carry clear
-.fa8b	69 30		adc #$30	NOTHEX  adc     #'0'    	; If carry clear, we're 0-9
-.fa8d	8d 30 7f	sta $7f30	PUTSER  sta     SDR     	; write to transmit register
-.fa90	ad 31 7f	lda $7f31	WRS1    LDA     SSR     	; get status
-.fa93	29 10		and #$10	        and     #TX_RDY 	; see if transmitter is busy
-.fa95	f0 f9		beq $fa90	        beq     WRS1    	; if it is, wait
-.fa97	60		rts		        rts
-.fa98	68		pla		PUTSTRI pla			; Get the low part of "return" address (data start address)
-.fa99	85 00		sta $00		        sta     DPL
-.fa9b	68		pla		        pla
-.fa9c	85 01		sta $01		        sta     DPH             ; Get the high part of "return" address
-.fa9e	a0 01		ldy #$01	PSINB   ldy     #1
-.faa0	b1 00		lda ($00),y	        LDA     (DPL),y         ; Get the next string character
-.faa2	e6 00		inc $00		        inc     DPL             ; update the pointer
-.faa4	d0 02		bne $faa8	        bne     PSICHO          ; if not, we're pointing to next character
-.faa6	e6 01		inc $01		        inc     DPH             ; account for page crossing
-.faa8	09 00		ora #$00	PSICHO  ora     #0              ; Set flags according to contents of Accumulator
-.faaa	f0 06		beq $fab2	        beq     PSIX1           ; don't print the final NULL
-.faac	20 8d fa	jsr $fa8d	        jsr     PUTSER          ; write it out
-.faaf	4c 9e fa	jmp $fa9e	        jmp     PSINB           ; back around
-.fab2	e6 00		inc $00		PSIX1   inc     DPL             ;
-.fab4	d0 02		bne $fab8	        bne     PSIX2           ;
-.fab6	e6 01		inc $01		        inc     DPH             ; account for page crossing
-.fab8	6c 00 00	jmp ($0000)	PSIX2   jmp     (DPL)           ; return to byte following final NULL
-.fabb	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
-.fabe	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
-.fac1	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
->fffa	be fa				NMIENT  .word     GONMI
->fffc	c1 fa				RSTENT  .word     GORST
->fffe	bb fa				IRQENT  .word     GOIRQ
+.f815	20 88 f8	jsr $f888		jsr	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+.f818					SPAMLOOP
+.f818	8d 00 40	sta $4000		sta	$4000		; ram for CS LED side effect
+.f81b	a9 2a		lda #$2a		lda 	#'*'
+.f81d	20 9e f8	jsr $f89e		jsr 	OUTFIFO
+.f820	a0 80		ldy #$80		LDY	#$80
+.f822	20 e8 f8	jsr $f8e8		jsr	WASTETM
+.f825	80 f1		bra $f818		bra	SPAMLOOP
+.f827	20 31 f8	jsr $f831	FIFOCHK	jsr	GETFIFO
+.f82a	90 fb		bcc $f827		bcc	FIFOCHK		; If no character, nothing to echo
+.f82c	20 57 f8	jsr $f857		jsr	PUTFIFO
+.f82f	80 f6		bra $f827		bra	FIFOCHK
+.f831	da		phx		GETFIFO	PHX				; Save X
+.f832	9c e3 7f	stz $7fe3		STZ     SYSTEM_VIA_DDRA		; D0-D7 from FIFO --> CPU (00 = make all port A pins inputs)
+.f835	a9 02		lda #$02	        LDA     #$02
+.f837	2c e0 7f	bit $7fe0		BIT     SYSTEM_VIA_IOB	; AND with b1 to see if RXF is low (character awaiting read) or RXF=1 (no data waiting)
+.f83a	f0 03		beq $f83f	       	BEQ     GFRD		; 0 = FIFO has a character, so read it in
+.f83c	18		clc			CLC			; carry clear means nothing is waiting
+.f83d	80 16		bra $f855		BRA GFXIT		; And return with carry clear because is waiting
+.f83f	ad e0 7f	lda $7fe0	GFRD: 	LDA     SYSTEM_VIA_IOB
+.f842	09 08		ora #$08	        ora     #$08    ; Save a copy of port B with PB3 set high.
+.f844	aa		tax		        tax     ; This will be used later.
+.f845	29 f7		and #$f7	        and     #$F7
+.f847	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
+.f84a	ea		nop		        nop	; FIXME: This is some dumb bullshift. That's ONE machine cycle.
+.f84b	ea		nop		        nop	; FIXME: Will retain for now in case it's papering over some other problem that the original firmware is working around.
+.f84c	ea		nop		        nop
+.f84d	ea		nop		        NOP
+.f84e	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
+.f851	8e e0 7f	stx $7fe0	        stx     SYSTEM_VIA_IOB
+.f854	38		sec			SEC		; Signal that a valid character is waiting
+.f855	fa		plx		GFXIT	PLX		; Restore X as it was used in routine
+.f856	60		rts			RTS
+.f857					PUTFIFO
+.f857	da		phx			PHX		; Save X since it's used here
+.f858	a9 01		lda #$01	       	LDA     #$01	; Wait for PB0 (TUSB_TXEB) to be low. This indicates FIFO can
+.f85a	2c e0 7f	bit $7fe0		BIT     SYSTEM_VIA_IOB
+.f85d	f0 03		beq $f862	        BEQ     PFTXGO
+.f85f	18		clc			CLC
+.f860	80 24		bra $f886		BRA	PFXIT	; FIFO is full; exit with carry clear to signal error to caller
+.f862	9c e3 7f	stz $7fe3	PFTXGO	STZ     SYSTEM_VIA_DDRA		; Set all BITs on port A to inputs.
+.f865	8d e1 7f	sta $7fe1	       	STA     SYSTEM_VIA_IOA
+.f868	ad e0 7f	lda $7fe0	        LDA     SYSTEM_VIA_IOB
+.f86b	29 fb		and #$fb	        AND     #$FB	; Save a copy of port B with PB2 low.
+.f86d	aa		tax		        TAX
+.f86e	09 04		ora #$04	        ora     #$04	; Set PB2 high.
+.f870	8d e0 7f	sta $7fe0	        STA     SYSTEM_VIA_IOB
+.f873	a9 ff		lda #$ff	        LDA     #$FF
+.f875	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
+.f878	ea		nop		        NOP
+.f879	ea		nop		        NOP
+.f87a	8e e0 7f	stx $7fe0	        STX     SYSTEM_VIA_IOB
+.f87d	ad e1 7f	lda $7fe1	        LDA     SYSTEM_VIA_IOA
+.f880	a2 00		ldx #$00	        ldx     #$00
+.f882	8e e3 7f	stx $7fe3	        STX     SYSTEM_VIA_DDRA
+.f885	38		sec			SEC					; Character was queued OK
+.f886	fa		plx		PFXIT:	PLX
+.f887	60		rts			RTS
+.f888					INITVIA
+.f888	9c eb 7f	stz $7feb		STZ 	SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
+.f88b	9c ec 7f	stz $7fec		STZ     SYSTEM_VIA_PCR	; Make sure CB2 floats so it doesn't interfere with flash bank#
+.f88e	9c e3 7f	stz $7fe3		STZ	SYSTEM_VIA_DDRA	; All inputs PA0-PA7 (but we can write to output reg.)
+.f891	a9 1c		lda #$1c		LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+.f893	8d e2 7f	sta $7fe2		STA	SYSTEM_VIA_DDRB
+.f896	ad e0 7f	lda $7fe0	WAIT245	LDA	SYSTEM_VIA_IOB
+.f899	29 20		and #$20		AND	#MASK5			; PB5 = PWRENB. 0=enabled 1=disabled
+.f89b	d0 f9		bne $f896		BNE	WAIT245
+.f89d	60		rts		        RTS
+.f89e	85 08		sta $08		OUTFIFO	STA	TEMP			; save output character
+.f8a0	9c e3 7f	stz $7fe3		STZ	SYSTEM_VIA_DDRA		; Make Port A an input (for the moment)
+.f8a3	a9 1c		lda #$1c		LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+.f8a5	8d e2 7f	sta $7fe2		STA	SYSTEM_VIA_DDRB
+.f8a8	a9 0c		lda #$0c		LDA	#(MASK3 + MASK2)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+.f8aa	8d e0 7f	sta $7fe0		STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
+.f8ad	ea		nop			NOP
+.f8ae	ea		nop			NOP
+.f8af	ea		nop			NOP
+.f8b0	a9 ff		lda #$ff		LDA	#$FF			; make Port A all outputs
+.f8b2	8d e3 7f	sta $7fe3		STA	SYSTEM_VIA_DDRA		; Now the output latches are on FIFO bus
+.f8b5	a5 08		lda $08			LDA	TEMP
+.f8b7	8d e1 7f	sta $7fe1		STA	SYSTEM_VIA_IOA		; Write output value to output latches
+.f8ba	ea		nop			NOP
+.f8bb	ea		nop			NOP
+.f8bc	ea		nop			NOP
+.f8bd	ea		nop			NOP				; excessive settle time.  FIMXE, probably at most 1 req'd
+.f8be	a9 08		lda #$08		LDA	#(MASK3)		; RD=1 WR=0
+.f8c0	8d e0 7f	sta $7fe0		STA	SYSTEM_VIA_IOB		; Low-going WR pulse should latch data
+.f8c3	ea		nop			NOP
+.f8c4	ea		nop			NOP
+.f8c5	ea		nop			NOP
+.f8c6	ea		nop			NOP
+.f8c7	a9 0c		lda #$0c		LDA	#(MASK3 + MASK2)
+.f8c9	8d e0 7f	sta $7fe0		STA	SYSTEM_VIA_IOB		; return to IDLE state
+.f8cc	9c e3 7f	stz $7fe3		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+.f8cf	60		rts			RTS
+.f8d0					Is_VIA_USB_RX_Data_Avail:
+.f8d0	a9 00		lda #$00	        LDA     #$00
+.f8d2	8d e3 7f	sta $7fe3	        STA     SYSTEM_VIA_DDRA
+.f8d5	a9 1c		lda #$1c		LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+.f8d7	8d e2 7f	sta $7fe2		STA	SYSTEM_VIA_DDRB
+.f8da	a9 02		lda #$02	        LDA     #$02
+.f8dc	2c e0 7f	bit $7fe0	        BIT     SYSTEM_VIA_IOB
+.f8df	d0 03		bne $f8e4	        bne     not_zero
+.f8e1	a9 01		lda #$01	        LDA     #$01
+.f8e3	60		rts		        RTS
+.f8e4					not_zero
+.f8e4	a9 00		lda #$00		LDA     #$00	; It is high, meaning there is no data available to read.
+.f8e6	60		rts		        RTS
+.f8e7					Do_Nothing_Subroutine_1:
+.f8e7	60		rts		        rts
+.f8e8	da		phx		WASTETM	phx
+.f8e9	a2 00		ldx #$00	WTLOOP  ldx     #$00
+.f8eb					loop_256_times
+.f8eb	8d 00 40	sta $4000		sta 	$4000
+.f8ee	ca		dex		        dex
+.f8ef	d0 fa		bne $f8eb	        bne     loop_256_times
+.f8f1	88		dey		        dey
+.f8f2	d0 f5		bne $f8e9	        bne 	WTLOOP
+.f8f4	fa		plx			plx
+.f8f5	60		rts		        rts
+.f8f6	a9 00		lda #$00	HEXDNLD LDA     #0
+.f8f8	85 07		sta $07		        sta     DLFAIL          ;Start by assuming no D/L failure
+.f8fa	20 c7 fa	jsr $fac7	        jsr     PUTSTRI
+>f8fd	0d 0a 0d 0a			        .text   13,10,13,10
+>f901	53 65 6e 64 20 36 35 43		        .text   "Send 65C02/65C816 code in"
+>f909	30 32 2f 36 35 43 38 31 36 20 63 6f 64 65 20 69
+>f919	6e
+>f91a	20 49 6e 74 65 6c 20 48		        .text   " Intel Hex format"
+>f922	65 78 20 66 6f 72 6d 61 74
+>f92b	20 61 74 20 31 39 32 30		        .text  " at 19200,n,8,1 ->"
+>f933	30 2c 6e 2c 38 2c 31 20 2d 3e
+>f93d	0d 0a				        .text   13,10
+>f93f	00					.text	0		; Null-terminate unless you prefer to crash.
+.f940	20 7c fa	jsr $fa7c	HDWRECS jsr     GETSER          ; Wait for start of record mark ':'
+.f943	c9 3a		cmp #$3a	        cmp     #':'
+.f945	d0 f9		bne $f940	        bne     HDWRECS         ; not found yet
+.f947	20 87 fa	jsr $fa87	        jsr     GETHEX          ; Get the record length
+.f94a	85 02		sta $02		        sta     RECLEN          ; save it
+.f94c	85 06		sta $06		        sta     CHKSUM          ; and save first byte of checksum
+.f94e	20 87 fa	jsr $fa87	        jsr     GETHEX          ; Get the high part of start address
+.f951	85 04		sta $04		        sta     START_HI
+.f953	18		clc		        clc
+.f954	65 06		adc $06		        adc     CHKSUM          ; Add in the checksum
+.f956	85 06		sta $06		        sta     CHKSUM          ;
+.f958	20 87 fa	jsr $fa87	        jsr     GETHEX          ; Get the low part of the start address
+.f95b	85 03		sta $03		        sta     START_LO
+.f95d	18		clc		        clc
+.f95e	65 06		adc $06		        adc     CHKSUM
+.f960	85 06		sta $06		        sta     CHKSUM
+.f962	20 87 fa	jsr $fa87	        jsr     GETHEX          ; Get the record type
+.f965	85 05		sta $05		        sta     RECTYPE         ; & save it
+.f967	18		clc		        clc
+.f968	65 06		adc $06		        adc     CHKSUM
+.f96a	85 06		sta $06		        sta     CHKSUM
+.f96c	a5 05		lda $05		        LDA     RECTYPE
+.f96e	d0 2c		bne $f99c	        bne     HDER1           ; end-of-record
+.f970	a6 02		ldx $02		        ldx     RECLEN          ; number of data bytes to write to memory
+.f972	a0 00		ldy #$00	        ldy     #0              ; start offset at 0
+.f974	20 87 fa	jsr $fa87	HDLP1   jsr     GETHEX          ; Get the first/next/last data byte
+.f977	91 03		sta ($03),y	        sta     (START_LO),y    ; Save it to RAM
+.f979	18		clc		        clc
+.f97a	65 06		adc $06		        adc     CHKSUM
+.f97c	85 06		sta $06		        sta     CHKSUM          ;
+.f97e	c8		iny		        iny                     ; update data pointer
+.f97f	ca		dex		        dex                     ; decrement count
+.f980	d0 f2		bne $f974	        bne     HDLP1
+.f982	20 87 fa	jsr $fa87	        jsr     GETHEX          ; get the checksum
+.f985	18		clc		        clc
+.f986	65 06		adc $06		        adc     CHKSUM
+.f988	d0 08		bne $f992	        bne     HDDLF1          ; If failed, report it
+.f98a	a9 23		lda #$23	        LDA     #'#'            ; Character indicating record OK = '#'
+.f98c	8d 30 7f	sta $7f30	        sta     SDR             ; write it out but don't wait for output
+.f98f	4c 40 f9	jmp $f940	        jmp     HDWRECS         ; get next record
+.f992	a9 46		lda #$46	HDDLF1  LDA     #'F'            ; Character indicating record failure = 'F'
+.f994	85 07		sta $07		        sta     DLFAIL          ; download failed if non-zero
+.f996	8d 30 7f	sta $7f30	        sta     SDR             ; write it to transmit buffer register
+.f999	4c 40 f9	jmp $f940	        jmp     HDWRECS         ; wait for next record start
+.f99c	c9 01		cmp #$01	HDER1   cmp     #1              ; Check for end-of-record type
+.f99e	f0 31		beq $f9d1	        beq     HDER2
+.f9a0	20 c7 fa	jsr $fac7	        jsr     PUTSTRI         ; Warn user of unknown record type
+>f9a3	0d 0a 0d 0a			        .text   13,10,13,10
+>f9a7	55 6e 6b 6e 6f 77 6e 20		        .text   "Unknown record type $"
+>f9af	72 65 63 6f 72 64 20 74 79 70 65 20 24
+>f9bc	00					.text	0		; null-terminate unless you prefer to crash!
+.f9bd	a5 05		lda $05		        LDA     RECTYPE         ; Get it
+.f9bf	85 07		sta $07			sta	DLFAIL		; non-zero --> download has failed
+.f9c1	20 a9 fa	jsr $faa9	        jsr     PUTHEX          ; print it
+.f9c4	a9 0d		lda #$0d		LDA     #13		; but we'll let it finish so as not to
+.f9c6	20 bc fa	jsr $fabc	        jsr     PUTSER		; falsely start a new d/l from existing
+.f9c9	a9 0a		lda #$0a	        LDA     #10		; file that may still be coming in for
+.f9cb	20 bc fa	jsr $fabc	        jsr     PUTSER		; quite some time yet.
+.f9ce	4c 40 f9	jmp $f940		jmp	HDWRECS
+.f9d1	20 87 fa	jsr $fa87	HDER2   jsr     GETHEX          ; get the checksum
+.f9d4	18		clc		        clc
+.f9d5	65 06		adc $06		        adc     CHKSUM          ; Add previous checksum accumulator value
+.f9d7	f0 21		beq $f9fa	        beq     HDER3           ; checksum = 0 means we're OK!
+.f9d9	20 c7 fa	jsr $fac7	        jsr     PUTSTRI         ; Warn user of bad checksum
+>f9dc	0d 0a 0d 0a			        .text   13,10,13,10
+>f9e0	42 61 64 20 72 65 63 6f		        .text   "Bad record checksum!",13,10
+>f9e8	72 64 20 63 68 65 63 6b 73 75 6d 21 0d 0a
+>f9f6	00				        .text   0		; Null-terminate or 6502 go bye-bye
+.f9f7	4c 00 f8	jmp $f800	        jmp     START
+.f9fa	a5 07		lda $07		HDER3   LDA     DLFAIL
+.f9fc	f0 27		beq $fa25	        beq     HDEROK
+.f9fe	20 c7 fa	jsr $fac7	        jsr     PUTSTRI
+>fa01	0d 0a 0d 0a			        .text   13,10,13,10
+>fa05	44 6f 77 6e 6c 6f 61 64		        .text   "Download Failed",13,10
+>fa0d	20 46 61 69 6c 65 64 0d 0a
+>fa16	41 62 6f 72 74 69 6e 67		        .text   "Aborting!",13,10
+>fa1e	21 0d 0a
+>fa21	00					.text	0		; null-terminate every string yada yada.
+.fa22	4c 00 f8	jmp $f800	        jmp     START
+.fa25	20 c7 fa	jsr $fac7	HDEROK  jsr     PUTSTRI
+>fa28	0d 0a 0d 0a			        .text   13,10,13,10
+>fa2c	44 6f 77 6e 6c 6f 61 64		        .text   "Download Successful!",13,10
+>fa34	20 53 75 63 63 65 73 73 66 75 6c 21 0d 0a
+>fa42	4a 75 6d 70 69 6e 67 20		        .text   "Jumping to location $"
+>fa4a	74 6f 20 6c 6f 63 61 74 69 6f 6e 20 24
+>fa57	00					.text	0			; by now, I figure you know what this is for. :)
+.fa58	a9 20		lda #$20	        LDA	#>ENTRY_POINT		; Print the entry point in hex
+.fa5a	20 a9 fa	jsr $faa9	        jsr	PUTHEX
+.fa5d	a9 00		lda #$00	        LDA	#<ENTRY_POINT
+.fa5f	20 a9 fa	jsr $faa9		jsr	PUTHEX
+.fa62	20 c7 fa	jsr $fac7	        jsr	PUTSTRI
+>fa65	0d 0a				        .text   13,10
+>fa67	00				        .text   0		; stop lemming-like march of the program ctr. thru data
+.fa68	4c 00 20	jmp $2000	        jmp     ENTRY_POINT	; jump to canonical entry point
+.fa6b	a9 1f		lda #$1f	INITSER LDA     #SCTL_V 	; Set baud rate 'n stuff
+.fa6d	8d 33 7f	sta $7f33	        sta     SCTL
+.fa70	a9 0b		lda #$0b	        LDA     #SCMD_V 	; set parity, interrupt disable, n'stuff
+.fa72	8d 32 7f	sta $7f32	        sta     SCMD
+.fa75	60		rts		        rts
+.fa76	ad 31 7f	lda $7f31	SERRDY  LDA     SSR     	; look at serial status
+.fa79	29 08		and #$08	        and     #RX_RDY 	; strip off "character waiting" BIT
+.fa7b	60		rts		        rts             	; if zero, nothing waiting.
+.fa7c	ad 31 7f	lda $7f31	GETSER  LDA     SSR    		; look at serial status
+.fa7f	29 08		and #$08	        and     #RX_RDY 	; see if anything is ready
+.fa81	f0 f9		beq $fa7c	        beq     GETSER  	; busy-wait until character comes in!
+.fa83	ad 30 7f	lda $7f30	        LDA     SDR     	; get the character
+.fa86	60		rts		        rts
+.fa87	20 7c fa	jsr $fa7c	GETHEX  jsr     GETSER
+.fa8a	20 9e fa	jsr $fa9e	        jsr     MKNIBL  	; Convert to 0..F numeric
+.fa8d	0a		asl a		        asl     a
+.fa8e	0a		asl a		        asl     a
+.fa8f	0a		asl a		        asl     a
+.fa90	0a		asl a		        asl     a       	; This is the upper nibble
+.fa91	29 f0		and #$f0	        and     #$F0
+.fa93	85 08		sta $08		        sta     TEMP
+.fa95	20 7c fa	jsr $fa7c	        jsr     GETSER
+.fa98	20 9e fa	jsr $fa9e	        jsr     MKNIBL
+.fa9b	05 08		ora $08		        ora     TEMP
+.fa9d	60		rts		        rts             	; return with the nibble received
+.fa9e	c9 3a		cmp #$3a	MKNIBL  cmp     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
+.faa0	90 02		bcc $faa4	        bcc     MKNNH   	; If we borrowed, we lost the carry so 0..9
+.faa2	e9 08		sbc #$08	        sbc     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
+.faa4	e9 2f		sbc #$2f	MKNNH   sbc     #'0'-1  	; subtract off '0' (if carry clear coming in)
+.faa6	29 0f		and #$0f	        and     #$0F    	; no upper nibble no matter what
+.faa8	60		rts		        rts             	; and return the nibble
+.faa9	48		pha		PUTHEX  pha             	;
+.faaa	4a		lsr a		        lsr a
+.faab	4a		lsr a		        lsr a
+.faac	4a		lsr a		        lsr a
+.faad	4a		lsr a		        lsr a
+.faae	20 b2 fa	jsr $fab2	        jsr     PRNIBL
+.fab1	68		pla		        pla
+.fab2	29 0f		and #$0f	PRNIBL  and     #$0F    	; strip off the low nibble
+.fab4	c9 0a		cmp #$0a	        cmp     #$0A
+.fab6	90 02		bcc $faba	        bcc     NOTHEX  	; if it's 0-9, add '0' else also add 7
+.fab8	69 06		adc #$06	        adc     #6      	; Add 7 (6+carry=1), result will be carry clear
+.faba	69 30		adc #$30	NOTHEX  adc     #'0'    	; If carry clear, we're 0-9
+.fabc	8d 30 7f	sta $7f30	PUTSER  sta     SDR     	; write to transmit register
+.fabf	ad 31 7f	lda $7f31	WRS1    LDA     SSR     	; get status
+.fac2	29 10		and #$10	        and     #TX_RDY 	; see if transmitter is busy
+.fac4	f0 f9		beq $fabf	        beq     WRS1    	; if it is, wait
+.fac6	60		rts		        rts
+.fac7	68		pla		PUTSTRI pla			; Get the low part of "return" address (data start address)
+.fac8	85 00		sta $00		        sta     DPL
+.faca	68		pla		        pla
+.facb	85 01		sta $01		        sta     DPH             ; Get the high part of "return" address
+.facd	a0 01		ldy #$01	PSINB   ldy     #1
+.facf	b1 00		lda ($00),y	        LDA     (DPL),y         ; Get the next string character
+.fad1	e6 00		inc $00		        inc     DPL             ; update the pointer
+.fad3	d0 02		bne $fad7	        bne     PSICHO          ; if not, we're pointing to next character
+.fad5	e6 01		inc $01		        inc     DPH             ; account for page crossing
+.fad7	09 00		ora #$00	PSICHO  ora     #0              ; Set flags according to contents of Accumulator
+.fad9	f0 06		beq $fae1	        beq     PSIX1           ; don't print the final NULL
+.fadb	20 bc fa	jsr $fabc	        jsr     PUTSER          ; write it out
+.fade	4c cd fa	jmp $facd	        jmp     PSINB           ; back around
+.fae1	e6 00		inc $00		PSIX1   inc     DPL             ;
+.fae3	d0 02		bne $fae7	        bne     PSIX2           ;
+.fae5	e6 01		inc $01		        inc     DPH             ; account for page crossing
+.fae7	6c 00 00	jmp ($0000)	PSIX2   jmp     (DPL)           ; return to byte following final NULL
+.faea	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
+.faed	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
+.faf0	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
+>fffa	ed fa				NMIENT  .word     GONMI
+>fffc	f0 fa				RSTENT  .word     GORST
+>fffe	ea fa				IRQENT  .word     GOIRQ
 
 ;******  End of listing
