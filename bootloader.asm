@@ -146,8 +146,8 @@ FIFOPWR:
 ;
 
 ; Attempt to output the byte in A.
-; If successful, the carry flag will be clear.
-; If the FIFO is full, it will return immediately with the carry set.
+; If successful, the carry flag will be SET
+; If the FIFO is full, it will return immediately with the carry clear.
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is set.
 FIFOOUT
@@ -155,7 +155,7 @@ FIFOOUT
 		LDA		SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
 		AND 	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 		BEQ		OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-		SEC						; Tell caller the character in A was NOT sent b/c FIFO is full
+		CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
 		BRA OFX1				; And quit.  Caller is responsible for re-trying the failed call
 	; Step 1: Set Port A to receive data from FIFO
 OFCONT1
@@ -176,12 +176,21 @@ OFCONT1
 		LDA	#(MASK3 + MASK2)
 		STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-		CLC						; signal success to caller
+		SEC						; signal success to caller
 OFX1:	RTS
 ;
 ;
 ;
-FIFOIN	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
+; On return:
+; If Carry flag is set, A contains the next byte from the FIFO
+; If carry flag is clear, there were no characters waiting
+FIFOIN	LDA		SYSTEM_VIA_IORB	; Check RXF flag
+		AND		#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
+		BEQ 	FIHASC			; If taken, FIFO has data to read in	
+		; RXF = 1 so FIFO is empty.  Nothing to return.
+		CLC
+		BRA		INFXIT
+FIHASC	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
 		LDX		#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
 		STX		SYSTEM_VIA_DDRB	
 		NOP
@@ -189,10 +198,7 @@ FIFOIN	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
 		NOP
 		LDA		SYSTEM_VIA_IORB
 		AND 	#(MASK3)			; RXF bit
-		; BEQ	FIFO_HASC			; Don't read from empty FIFO
-		; CLC					; Carry clear means no data waiting
-		; BRA	INFXIT
-FIFO_HASC
+		
 		LDX	#(MASK3 + MASK2)		; RD=1 WR=1
 		STX	SYSTEM_VIA_IORB			; RD=1 WR=1 (RD must go to 0 to read)
 		; Port A is already an input.  Toggle RD low 
@@ -205,7 +211,7 @@ FIFO_HASC
 		LDA	SYSTEM_VIA_IORA			; read it in
 		LDX	#(MASK3 + MASK2)		; go back to inactive signals RD and WR
 		STX	SYSTEM_VIA_IORB
-		SEC					; we bot a byte!
+		SEC							; we bot a byte!
 INFXIT	RTS
 
 
