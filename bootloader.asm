@@ -116,94 +116,126 @@ SPAMLOOP
 	jsr	WASTETM
 	bra	SPAMLOOP
 
+; System VIA named bitmasks
+PB0 = MASK0
+PB1 = MASK1
 PB2 = MASK2
 PB3 = MASK3
 PB5 = MASK5
 
+FIFO_TXE = PB0
+FIFO_RXF = PB1
 FIFO_WR = PB2
 FIFO_RD = PB3
 FIFO_PWREN = PB5
 
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
+; On exit:
+;
+; 1.	CA2 and CB2 are floating; This ensures writes to system VIA port B don't inadvertently change 
+;		the flash bank#.  This is accomplished by writing $00 to SYSTEM_VIA_PCR 
+;		Bank # is 0-3, 32K blocks as follows:
+;		CB2 supplies A16 to SST39F010A FLASH
+;		CA2 supplies A15 to SST39F010A FLASH
+;
+;    	CB2=0 CA2=0: Bank 0: 	FLASH address: $00.0000 - $00.7FFF	CPU address $00.8000-$00.FFFF - Free
+;		CB2=0 CA2=1: Bank 1: 	FLASH address  $00.8000 - $00.FFFF	CPU address $00.8000-$00.FFFF - Free
+;		CB2=1 CA2=0: Bank 2: 	FLASH address  $01.0000 - $01.7FFF	CPU address $00.8000-$00.FFFF - Free
+;       CB2=1 CA2=1: Bank 3: 	FLASH address  $01.8000 - $01.FFFF  CPU address $00.8000-$00.FFFF - MONITOR 
+;
+;	It probably goes without saying that trying to change the bank while running from flash requires some trickery.
+;   The easiest way to swap banks is to do so from a program running in RAM, but consider that system vectors
+;	will change and it may make sense to have a vector and handler in place in each block before a block change.
+;	
+;
+; 2.	System VIA port A is set to all inputs.  Port A is a bi-directional data transfer port to and from the FT245 FIFO
+;
+; 3.	System VIA port B is set to inputs, except PB2 and PB3, outputs to the FIFO's RD and WR lines, respectively
+;
+;
+;
+; 
 INITVIA
-	STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
-	STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.
-	STZ		SYSTEM_VIA_DDRA			; All inputs PA0-PA7 (but we can write to output reg.)
-	STZ		SYSTEM_VIA_DDRB			; Port B is only guaranteed an input if this was called from RESET
-	LDA		#FIFO_RD			;
-	STA		SYSTEM_VIA_IOB			; Set output register so we start life with FIFO RD=1, WR=0 (FIFO idle)
-	LDA		#(FIFO_RD + FIFO_WR)	; Outputs:  PB2 (FIFO WR strobe), PB3 (FIFO RD strobe)
-	STA		SYSTEM_VIA_DDRB			; FIFO read and write strobe pins are now outputs, RD=1, WR=0 (IDLE) state initially
-	; Wait for FTDI chip to be initialized (PWRENB is 0)
-	NOP								; FIXME: Defensive and massive overkill.  Await pin direction change stable
-	NOP
-	NOP
-	NOP
+		STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
+		STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+		STZ		SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
+		STZ		SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
+		LDA		#FIFO_RD				;
+		STA		SYSTEM_VIA_IOB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
+		LDA		#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
+		STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IOB write
+		; Defensively wait for ports to settle 
+		NOP								; FIXME: Defensive and possibly unnecessary
 FIFOPWR:
-	; FIXME: Add timeout here
-	LDA		SYSTEM_VIA_IOB
-	AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
-	BNE		FIFOPWR	
-    RTS
+		; FIXME: Add timeout here
+		LDA		SYSTEM_VIA_IOB
+		AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+		BNE		FIFOPWR	
+		RTS
 ;
 
-; Raw FIFO output.  Use with caution as there's no flow control.  This works as long as 
-; the FIFO has room.  Check that before calling this function.
+; Attempt to output the byte in A.
+; If successful, the carry flag will be clear.
+; If the FIFO is full, it will return immediately with the carry set.
+; Caller is responsible for checking the carry flag with BCC or BCS 
+; and re-trying if carry is set.
 OUTFIFO	
-	STA	TEMP				; save output character
+		STA		TEMP			; save output character
+		LDA		SYSTEM_VIA_IOB	; Read in FIFO status Port for FIFO
+		AND 	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+		BEQ		OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+		SEC						; Tell caller the character in A was NOT sent b/c FIFO is full
+		BRA OFX1				; And quit.  Caller is responsible for re-trying the failed call
 	; Step 1: Set Port A to receive data from FIFO
-	STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
-	
-	LDA	#FIFO_RD			; RD=1 WR=0 (WR must go 1->0 for FIFO write)
-	STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
-	LDA	#$FF				; make Port A all outputs
-	STA	SYSTEM_VIA_DDRA		; Save data to output latches
-	LDA	TEMP
-	STA	SYSTEM_VIA_IOA		; Write output value to output latches 
-	NOP
-	NOP						; FIXME
-	NOP
-	NOP						; excessive settle time.  FIMXE, probably at most 1 req'd
-	; Now the data's stable on PA0-7, pull WR line low (leave RD high)
-	LDA	#(MASK3)		; RD=1 WR=0
-	STA	SYSTEM_VIA_IOB		; Low-going WR pulse should latch data
-	NOP
-	NOP
-	NOP
-	NOP
-	LDA	#(MASK3 + MASK2)
-	STA	SYSTEM_VIA_IOB		; return to IDLE state
-	STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-	RTS
+OFCONT1
+		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
+		LDA	#FIFO_RD			; RD=1 WR=0 (WR must go 1->0 for FIFO write)
+		STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
+		LDA	#$FF				; make Port A all outputs
+		STA	SYSTEM_VIA_DDRA		; Save data to output latches
+		LDA	TEMP
+		STA	SYSTEM_VIA_IOA		; Write output value to output latches 
+		NOP						; Some settling time of data output just to be safe
+		NOP
+		; Now the data's stable on PA0-7, pull WR line low (leave RD high)
+		LDA	#(MASK3)			; RD=1 WR=0
+		STA	SYSTEM_VIA_IOB		; Low-going WR pulse should latch data
+		NOP						; Hold time following write strobe, to ensure value is latched OK
+		NOP
+		LDA	#(MASK3 + MASK2)
+		STA	SYSTEM_VIA_IOB		; return to IDLE state (RD=1, WR=0)
+		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+		CLC						; signal success to caller
+OFX1:	RTS
 ;
 ;
 ;
-INFIFO	STZ	SYSTEM_VIA_DDRA			; Make Port A an input
-	LDX	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
-	STX	SYSTEM_VIA_DDRB	
-	NOP
-	NOP
-	NOP
-	LDA	SYSTEM_VIA_IOB
-	AND 	#(MASK3)			; RXF bit
-	; BEQ	FIFO_HASC			; Don't read from empty FIFO
-	; CLC					; Carry clear means no data waiting
-	; BRA	INFXIT
+INFIFO	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
+		LDX		#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
+		STX		SYSTEM_VIA_DDRB	
+		NOP
+		NOP
+		NOP
+		LDA		SYSTEM_VIA_IOB
+		AND 	#(MASK3)			; RXF bit
+		; BEQ	FIFO_HASC			; Don't read from empty FIFO
+		; CLC					; Carry clear means no data waiting
+		; BRA	INFXIT
 FIFO_HASC
-	LDX	#(MASK3 + MASK2)		; RD=1 WR=1
-	STX	SYSTEM_VIA_IOB			; RD=1 WR=1 (RD must go to 0 to read)
-	; Port A is already an input.  Toggle RD low 
-	LDX	#(MASK3)		; RD=0 WR=1
-	STX	SYSTEM_VIA_IOB		; Low-going WRD pulse, FIFO presents data
-	NOP
-	NOP
-	NOP
-	NOP
-	LDA	SYSTEM_VIA_IOA			; read it in
-	LDX	#(MASK3 + MASK2)		; go back to inactive signals RD and WR
-	STX	SYSTEM_VIA_IOB
-	SEC					; we bot a byte!
+		LDX	#(MASK3 + MASK2)		; RD=1 WR=1
+		STX	SYSTEM_VIA_IOB			; RD=1 WR=1 (RD must go to 0 to read)
+		; Port A is already an input.  Toggle RD low 
+		LDX	#(MASK3)		; RD=0 WR=1
+		STX	SYSTEM_VIA_IOB		; Low-going WRD pulse, FIFO presents data
+		NOP
+		NOP
+		NOP
+		NOP
+		LDA	SYSTEM_VIA_IOA			; read it in
+		LDX	#(MASK3 + MASK2)		; go back to inactive signals RD and WR
+		STX	SYSTEM_VIA_IOB
+		SEC					; we bot a byte!
 INFXIT	RTS
 
 ;;;; ================================= Mostly to-junk FIFO functions =======================
