@@ -74,7 +74,7 @@ IRQVEC   =      $7EFE   ; write IRQ vector here
 
 
 
-*= $F800						; Monitor start address
+*= $F800							; Monitor start address
 START   	SEI                     ; disable interrupts
         	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
         	LDX     #$FF            ; Set up the stack pointer
@@ -85,13 +85,33 @@ START   	SEI                     ; disable interrupts
         	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         	STA     NMIVEC
         	STA     IRQVEC
-			JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-ECHO		LDA	#'*'
-			JSR	FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
-ECHO2		JSR	FIFOIN
-			BCC	ECHO2		; Wait for an incoming character
-			JSR	FIFOOUT
-			BRA	ECHO2
+			JSR		INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+			JSR		INITSER
+			
+			LDA		#'*'
+			JSR		FIFOOUT
+			LDA		#'6'
+			JSR		FIFOOUT
+			LDA		#'9'
+			JSR		FIFOOUT
+ECHO		JSR		FIFOIN
+			BCC		ECHO		; Wait for an incoming character
+			JSR		FIFOOUT
+			BRA		ECHO
+			
+			LDA		#'*'
+E1			JSR		PUTSER		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
+			BCC		E1
+			LDA		#'6'
+E2			JSR		PUTSER
+			BCC		E2
+			LDA		#'9'
+E3			JSR 	PUTSER
+			BCC		E3
+ECHO2		JSR		FIFOIN
+			BCC		ECHO2		; Wait for an incoming character
+			JSR		FIFOOUT
+			BRA		ECHO2
 
 ; Serial functions
 ; Set up baud rate, parity, stop bits, interrupt control, etc. for
@@ -103,8 +123,10 @@ INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
 			RTS
 
 ; Call to get the next waiting serial character. 
-; Returns carry flag set if character was read.  Character will be in A15
+; Returns carry flag set if character was read.  Character will be in A
 ; Returns carry clear (C=0) if no character is waiting
+; A and flags are destroyed (obviously)
+
 GETSER 		LDA     SSR    		; look at serial status
 			AND     #RX_RDY 	; see if anything is ready
 			CLC					; signal no character waiting
@@ -113,6 +135,9 @@ GETSER 		LDA     SSR    		; look at serial status
 			SEC					; Signal receipt of character
 GSXIT1		RTS	
  
+; Uses X as temporary storage, so it's saved
+; A is preserved 
+; Save A because this allows for multiple calls until transmitter is ready (kludge-mode)
 PUTSER		PHX
 			PHA
 			TAX					; save output character in X		
