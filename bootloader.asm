@@ -151,31 +151,31 @@ FIFOPWR:
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is set.
 FIFOOUT 	STA	TEMP			; save output character
-		LDA	SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
-		AND         #FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-		BEQ	OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-		CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
-		BRA 	OFX1				; And quit.  Caller is responsible for re-trying the failed call
-	; Step 1: Set Port A to receive data from FIFO
-OFCONT1
-		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
+		LDA	SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
+		AND	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+		CLC
+		BNE	OFX1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+		; FIFO has room - write A to FIFO in a series of steps
+OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
 		LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 		STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
-		LDA	#$FF				; make Port A all outputs
+		LDA	#$FF			; make Port A all outputs
 		STA	SYSTEM_VIA_DDRA		; Save data to output latches
 		LDA	TEMP
 		STA	SYSTEM_VIA_IORA		; Write output value to output latches 
-		NOP						; Some settling time of data output just to be safe
+		NOP				; Some settling time of data output just to be safe
+		NOP
+		NOP
 		NOP
 		; Now the data's stable on PA0-7, pull WR line low (leave RD high)
-		LDA	#(MASK3)			; RD=1 WR=0
+		LDA	#(FIFO_RD)		; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
 		STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
-		NOP						; Hold time following write strobe, to ensure value is latched OK
+		NOP				; Hold time following write strobe, to ensure value is latched OK
 		NOP
-		LDA	#FIFO_RD		; RD=1, WR=0
-		STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
+		NOP
+		NOP
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-		SEC						; signal success to caller
+		SEC				; signal success of write to caller
 OFX1:	  	RTS
 ;
 ;
@@ -185,11 +185,9 @@ OFX1:	  	RTS
 ; If carry flag is clear, there were no characters waiting
 FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
-		BEQ 	FIHASC			; If taken, FIFO has data to read in	
-		; RXF = 1 so FIFO is empty.  Nothing to return.
 		CLC
-		BRA	INFXIT
-FIHASC		STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
+		BNE 	INFXIT			; If RXF is 1, then no character is waiting!
+		STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
 		LDA	#FIFO_RD
 		STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
 		NOP
@@ -207,9 +205,9 @@ INFXIT		RTS
 
 
 ; User "shadow" vectors:
-GOIRQ		jmp	(IRQVEC)
-GONMI		jmp	(NMIVEC)
-GORST		jmp	START		; Allowing user program to change this is a mistake
+GOIRQ		JMP	(IRQVEC)
+GONMI		JMP	(NMIVEC)
+GORST		JMP	START		; Allowing user program to change this is a mistake
 
 * = $FFFA
 ;  start at $FFFA
