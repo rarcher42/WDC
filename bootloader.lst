@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass.exe -c -L bootloader.lst bootloader.asm
-; Mon Jun 24 20:34:39 2024
+; Mon Jun 24 21:05:19 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -97,7 +97,7 @@
 .f847	ad e0 7f	lda $7fe0			LDA		SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
 .f84a	29 01		and #$01			AND 	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 .f84c	f0 03		beq $f851			BEQ		OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-.f84e	38		sec				SEC						; Tell caller the character in A was NOT sent b/c FIFO is full
+.f84e	18		clc				CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
 .f84f	80 24		bra $f875			BRA OFX1				; And quit.  Caller is responsible for re-trying the failed call
 .f851					OFCONT1
 .f851	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
@@ -116,35 +116,32 @@
 .f86c	a9 0c		lda #$0c			LDA	#(MASK3 + MASK2)
 .f86e	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
 .f871	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-.f874	18		clc				CLC						; signal success to caller
+.f874	38		sec				SEC						; signal success to caller
 .f875	60		rts		OFX1:	RTS
-.f876	9c e3 7f	stz $7fe3	FIFOIN	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
-.f879	a2 1c		ldx #$1c			LDX		#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
-.f87b	8e e2 7f	stx $7fe2			STX		SYSTEM_VIA_DDRB
-.f87e	ea		nop				NOP
-.f87f	ea		nop				NOP
-.f880	ea		nop				NOP
-.f881	ad e0 7f	lda $7fe0			LDA		SYSTEM_VIA_IORB
-.f884	29 08		and #$08			AND 	#(MASK3)			; RXF bit
-.f886					FIFO_HASC
-.f886	a2 0c		ldx #$0c			LDX	#(MASK3 + MASK2)		; RD=1 WR=1
-.f888	8e e0 7f	stx $7fe0			STX	SYSTEM_VIA_IORB			; RD=1 WR=1 (RD must go to 0 to read)
-.f88b	a2 08		ldx #$08			LDX	#(MASK3)		; RD=0 WR=1
-.f88d	8e e0 7f	stx $7fe0			STX	SYSTEM_VIA_IORB		; Low-going WRD pulse, FIFO presents data
-.f890	ea		nop				NOP
-.f891	ea		nop				NOP
-.f892	ea		nop				NOP
-.f893	ea		nop				NOP
-.f894	ad e1 7f	lda $7fe1			LDA	SYSTEM_VIA_IORA			; read it in
-.f897	a2 0c		ldx #$0c			LDX	#(MASK3 + MASK2)		; go back to inactive signals RD and WR
-.f899	8e e0 7f	stx $7fe0			STX	SYSTEM_VIA_IORB
-.f89c	38		sec				SEC					; we bot a byte!
-.f89d	60		rts		INFXIT	RTS
-.f89e	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
-.f8a1	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
-.f8a4	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
->fffa	a1 f8				NMIENT  .word     GONMI
->fffc	a4 f8				RSTENT  .word     GORST
->fffe	9e f8				IRQENT  .word     GOIRQ
+.f876	ad e0 7f	lda $7fe0	FIFOIN	LDA		SYSTEM_VIA_IORB	; Check RXF flag
+.f879	29 02		and #$02			AND		#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
+.f87b	f0 03		beq $f880			BEQ 	FIHASC			; If taken, FIFO has data to read in
+.f87d	18		clc				CLC
+.f87e	80 19		bra $f899			BRA		INFXIT
+.f880	9c e3 7f	stz $7fe3	FIHASC	STZ		SYSTEM_VIA_DDRA		; Make Port A inputs
+.f883	a9 08		lda #$08			LDA		#FIFO_RD
+.f885	8d e0 7f	sta $7fe0			STA		SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+.f888	ea		nop				NOP
+.f889	9c e0 7f	stz $7fe0			STZ		SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A
+.f88c	ea		nop				NOP
+.f88d	ea		nop				NOP
+.f88e	ad e1 7f	lda $7fe1			LDA		SYSTEM_VIA_IORA			; read data in
+.f891	48		pha				PHA
+.f892	a9 08		lda #$08			LDA		#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+.f894	8d e0 7f	sta $7fe0			STA		SYSTEM_VIA_IORB
+.f897	68		pla				PLA
+.f898	38		sec				SEC							; we bot a byte!
+.f899	60		rts		INFXIT	RTS
+.f89a	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
+.f89d	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
+.f8a0	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
+>fffa	9d f8				NMIENT  .word     GONMI
+>fffc	a0 f8				RSTENT  .word     GORST
+>fffe	9a f8				IRQENT  .word     GOIRQ
 
 ;******  End of listing

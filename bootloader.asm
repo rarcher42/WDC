@@ -190,27 +190,18 @@ FIFOIN	LDA		SYSTEM_VIA_IORB	; Check RXF flag
 		; RXF = 1 so FIFO is empty.  Nothing to return.
 		CLC
 		BRA		INFXIT
-FIHASC	STZ		SYSTEM_VIA_DDRA			; Make Port A an input
-		LDX		#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
-		STX		SYSTEM_VIA_DDRB	
+FIHASC	STZ		SYSTEM_VIA_DDRA		; Make Port A inputs
+		LDA		#FIFO_RD
+		STA		SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+		NOP
+		STZ		SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A	
 		NOP
 		NOP
-		NOP
-		LDA		SYSTEM_VIA_IORB
-		AND 	#(MASK3)			; RXF bit
-		
-		LDX	#(MASK3 + MASK2)		; RD=1 WR=1
-		STX	SYSTEM_VIA_IORB			; RD=1 WR=1 (RD must go to 0 to read)
-		; Port A is already an input.  Toggle RD low 
-		LDX	#(MASK3)		; RD=0 WR=1
-		STX	SYSTEM_VIA_IORB		; Low-going WRD pulse, FIFO presents data
-		NOP
-		NOP
-		NOP
-		NOP
-		LDA	SYSTEM_VIA_IORA			; read it in
-		LDX	#(MASK3 + MASK2)		; go back to inactive signals RD and WR
-		STX	SYSTEM_VIA_IORB
+		LDA		SYSTEM_VIA_IORA			; read data in
+		PHA
+		LDA		#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+		STA		SYSTEM_VIA_IORB
+		PLA
 		SEC							; we bot a byte!
 INFXIT	RTS
 
