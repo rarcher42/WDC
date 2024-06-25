@@ -5,17 +5,36 @@
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
 ;
-; Zero page storage:
+; AND masks for bit positions
+MASK0	=	 %00000001
+MASK1	=	 %00000010
+MASK2	=	 %00000100
+MASK3	=	 %00001000
+MASK4	=	 %00010000
+MASK5	=	 %00100000
+MASK6	=	 %01000000
+MASK7	=	 %10000000
+
+; Zero page storage map
+TEMP 		=   $F0     ; save hex value
+
+
+; 65C51 ACIA equates for serial I/O
 ;
-DPL 		=	$00     ; data pointer (two bytes)
-DPH  		=   $01     ; high of data pointer
-RECLEN  	=   $02     ; record length in bytes
-START_LO  	=   $03
-START_HI 	=   $04
-RECTYPE 	=   $05
-CHKSUM 		=   $06     ; record checksum accumulator
-DLFAIL		=   $07     ; flag for download failure
-TEMP 		=   $08     ; save hex value
+ACIA_BASE	= 	$7F30		; This is where the 6551 ACIA starts
+SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+SSR = ACIA_BASE+1     		; Serial data status register
+SCMD = ACIA_BASE+2     		; Serial command reg. ()
+SCTL = ACIA_BASE+3     		; Serial control reg. ()
+TX_RDY = MASK4
+RX_RDY = MASK3
+; Quick n'dirty assignments instead of proper definitions of each parameter
+; "ORed" together to build the desired flexible configuration.  We're going
+; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+;
+SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
+
 
 ; TIDE2VIA	the system VIA
 ; IO for the VIA which is used for the USB debugger interface.
@@ -47,37 +66,13 @@ FIFO_WR = PB2
 FIFO_RD = PB3
 FIFO_PWREN = PB5
 
-; 6551 ACIA equates for serial I/O
-;
-ACIA_BASE= $7F30		; This is where the 6551 ACIA starts
-SDR = ACIA_BASE       	; RX'ed bytes read, TX bytes written, here
-SSR = ACIA_BASE+1     	; Serial data status register. A write here
-                                ; causes a programmed reset.
-SCMD = ACIA_BASE+2     	; Serial command reg. ()
-SCTL = ACIA_BASE+3     	; Serial control reg. ()
-; Quick n'dirty assignments instead of proper definitions of each parameter
-; "ORed" together to build the desired flexible configuration.  We're going
-; to run 19200 baud, no parity, 8 data BITs, 1 stop BIT.  Period.  For now.
-;
-SCTL_V  = %00011111       ; 1 stop, 8 BITs, 19200 baud
-SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ, DTR*
-TX_RDY  = %00010000       ; AND mask for transmitter ready
-RX_RDY  = %00001000       ; AND mask for receiver buffer full
 ;
 
 ; "Shadow" RAM vectors (note each is $8000 below the actual ROM vector)
-NMIVEC	= 	 $7EFA	; write actual NMI vector here
-IRQVEC   =       $7EFE   ; write IRQ vector here
+NMIVEC	= 	 	$7EFA	; write actual NMI vector here
+IRQVEC   =      $7EFE   ; write IRQ vector here
 
-; Lazy stuff
-MASK0	=	 %00000001
-MASK1	=	 %00000010
-MASK2	=	 %00000100
-MASK3	=	 %00001000
-MASK4	=	 %00010000
-MASK5	=	 %00100000
-MASK6	=	 %01000000
-MASK7	=	 %10000000
+
 
 *= $F800						; Monitor start address
 START   	SEI                     ; disable interrupts
@@ -90,14 +85,46 @@ START   	SEI                     ; disable interrupts
         	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         	STA     NMIVEC
         	STA     IRQVEC
-		JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+			JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
 ECHO		LDA	#'*'
-		JSR	FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
+			JSR	FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
 ECHO2		JSR	FIFOIN
-		BCC	ECHO2		; Wait for an incoming character
-		JSR	FIFOOUT
-		BRA	ECHO2
+			BCC	ECHO2		; Wait for an incoming character
+			JSR	FIFOOUT
+			BRA	ECHO2
 
+; Serial functions
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+			STA 	SCTL		
+			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA     SCMD
+			RTS
+
+; Call to get the next waiting serial character. 
+; Returns carry flag set if character was read.  Character will be in A15
+; Returns carry clear (C=0) if no character is waiting
+GETSER 		LDA     SSR    		; look at serial status
+			AND     #RX_RDY 	; see if anything is ready
+			CLC					; signal no character waiting
+			BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
+			LDA    	SDR     	; get the character
+			SEC					; Signal receipt of character
+GSXIT1		RTS	
+ 
+PUTSER		PHX
+			PHA
+			TAX					; save output character in X		
+			LDA		SSR	
+			AND 	#TX_RDY	
+			CLC
+			BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
+			STX		SDR			; send the character	
+			SEC					; indicate success
+PSXIT1		PLA
+			PLX
+			RTS
 
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
@@ -159,10 +186,10 @@ FIFOOUT 	STA	TEMP			; save output character
 OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
 		LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 		STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
-		LDA	#$FF			; make Port A all outputs
-		STA	SYSTEM_VIA_DDRA		; Save data to output latches
 		LDA	TEMP
-		STA	SYSTEM_VIA_IORA		; Write output value to output latches 
+		STA	SYSTEM_VIA_IORA		; Set up output value in advance in Port A (still input so doesn't go out yet) 
+		LDA	#$FF			; make Port A all outputs with stable output value already set in prior lines
+		STA	SYSTEM_VIA_DDRA		; Save data to output latches
 		NOP				; Some settling time of data output just to be safe
 		NOP
 		NOP
@@ -176,7 +203,7 @@ OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
 		NOP
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
 		SEC				; signal success of write to caller
-OFX1:	  	RTS
+OFX1	  	RTS
 ;
 ;
 ;
@@ -194,12 +221,14 @@ FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A	
 		NOP
 		NOP
-		LDA	SYSTEM_VIA_IORA			; read data in
+		NOP
+		NOP
+		LDA	SYSTEM_VIA_IORA		; read data in
 		PHA
-		LDA	#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+		LDA	#FIFO_RD		; Restore back to inactive signals RD=1 and WR=0
 		STA	SYSTEM_VIA_IORB
 		PLA
-		SEC							; we bot a byte!
+		SEC				; we got a byte!
 INFXIT		RTS
 
 
