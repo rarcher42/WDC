@@ -80,23 +80,23 @@ MASK6	=	 %01000000
 MASK7	=	 %10000000
 
 *= $F800						; Monitor start address
-START   SEI                     ; disable interrupts
-        ; CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-        LDX     #$FF            ; Set up the stack pointer
-        TXS                     ;       "
-        LDA     #>START      	; Initialiaze the interrupt vectors
-        STA     NMIVEC+1        ; User program at ENTRY_POINT may change
-        STA     IRQVEC+1	; these vectors.  Just do change before enabling
-        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-        STA     NMIVEC
-        STA     IRQVEC
-		JSR		INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-ECHO	LDA		#'*'
-		JSR		FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
-ECHO2	JSR		FIFOIN
-		BCC		ECHO2		; Wait for an incoming character
-		JSR		FIFOOUT
-		BRA		ECHO2
+START   	SEI                     ; disable interrupts
+        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+        	LDX     #$FF            ; Set up the stack pointer
+        	TXS                     ;       "
+        	LDA     #>START      	; Initialiaze the interrupt vectors
+        	STA     NMIVEC+1        ; User program at ENTRY_POINT may change
+        	STA     IRQVEC+1	; these vectors.  Just do change before enabling
+        	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+        	STA     NMIVEC
+        	STA     IRQVEC
+		JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+ECHO		LDA	#'*'
+		JSR	FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
+ECHO2		JSR	FIFOIN
+		BCC	ECHO2		; Wait for an incoming character
+		JSR	FIFOOUT
+		BRA	ECHO2
 
 
 ;;;; ============================= New FIFO functions ======================================
@@ -129,19 +129,19 @@ ECHO2	JSR		FIFOIN
 INITVIA
 		STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
 		STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
-		STZ		SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
-		STZ		SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
-		LDA		#FIFO_RD				;
-		STA		SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-		LDA		#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
-		STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
+		STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
+		STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
+		LDA	#FIFO_RD				;
+		STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
+		LDA	#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
+		STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
 		; Defensively wait for ports to settle 
 		NOP								; FIXME: Defensive and possibly unnecessary
 FIFOPWR:
 		; FIXME: Add timeout here
-		LDA		SYSTEM_VIA_IORB
-		AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
-		BNE		FIFOPWR	
+		LDA	SYSTEM_VIA_IORB
+		AND	#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+		BNE	FIFOPWR	
 		RTS
 ;
 
@@ -150,17 +150,16 @@ FIFOPWR:
 ; If the FIFO is full, it will return immediately with the carry clear.
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is set.
-FIFOOUT
-		STA		TEMP			; save output character
-		LDA		SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
-		AND 	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-		BEQ		OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+FIFOOUT 	STA	TEMP			; save output character
+		LDA	SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
+		AND         #FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+		BEQ	OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 		CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
-		BRA OFX1				; And quit.  Caller is responsible for re-trying the failed call
+		BRA 	OFX1				; And quit.  Caller is responsible for re-trying the failed call
 	; Step 1: Set Port A to receive data from FIFO
 OFCONT1
 		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
-		LDA	#FIFO_RD			; RD=1 WR=0 (WR must go 1->0 for FIFO write)
+		LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 		STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
 		LDA	#$FF				; make Port A all outputs
 		STA	SYSTEM_VIA_DDRA		; Save data to output latches
@@ -173,50 +172,50 @@ OFCONT1
 		STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
 		NOP						; Hold time following write strobe, to ensure value is latched OK
 		NOP
-		LDA	#(MASK3 + MASK2)
+		LDA	#FIFO_RD		; RD=1, WR=0
 		STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
 		SEC						; signal success to caller
-OFX1:	RTS
+OFX1:	  	RTS
 ;
 ;
 ;
 ; On return:
 ; If Carry flag is set, A contains the next byte from the FIFO
 ; If carry flag is clear, there were no characters waiting
-FIFOIN	LDA		SYSTEM_VIA_IORB	; Check RXF flag
-		AND		#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
+FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
+		AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
 		BEQ 	FIHASC			; If taken, FIFO has data to read in	
 		; RXF = 1 so FIFO is empty.  Nothing to return.
 		CLC
-		BRA		INFXIT
-FIHASC	STZ		SYSTEM_VIA_DDRA		; Make Port A inputs
-		LDA		#FIFO_RD
-		STA		SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+		BRA	INFXIT
+FIHASC		STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
+		LDA	#FIFO_RD
+		STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
 		NOP
-		STZ		SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A	
+		STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A	
 		NOP
 		NOP
-		LDA		SYSTEM_VIA_IORA			; read data in
+		LDA	SYSTEM_VIA_IORA			; read data in
 		PHA
-		LDA		#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
-		STA		SYSTEM_VIA_IORB
+		LDA	#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+		STA	SYSTEM_VIA_IORB
 		PLA
 		SEC							; we bot a byte!
-INFXIT	RTS
+INFXIT		RTS
 
 
 
 ; User "shadow" vectors:
-GOIRQ	jmp	(IRQVEC)
-GONMI	jmp	(NMIVEC)
-GORST	jmp	START		; Allowing user program to change this is a mistake
+GOIRQ		jmp	(IRQVEC)
+GONMI		jmp	(NMIVEC)
+GORST		jmp	START		; Allowing user program to change this is a mistake
 
 * = $FFFA
 ;  start at $FFFA
 NMIENT  .word     GONMI
 RSTENT  .word     GORST
 IRQENT  .word     GOIRQ
-.end				; finally.  das Ende.
+.end				; finally.  das Ende.  Fini.  It's over.  Go home!
 
 Last page update: March 22, 2001. 

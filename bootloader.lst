@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass.exe -c -L bootloader.lst bootloader.asm
-; Mon Jun 24 21:05:19 2024
+; Tue Jun 25 12:36:16 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -61,87 +61,87 @@
 =$20					MASK5	=	 %00100000
 =$40					MASK6	=	 %01000000
 =$80					MASK7	=	 %10000000
-.f800	78		sei		START   SEI                     ; disable interrupts
-.f801	a2 ff		ldx #$ff	        LDX     #$FF            ; Set up the stack pointer
-.f803	9a		txs		        TXS                     ;       "
-.f804	a9 f8		lda #$f8	        LDA     #>START      	; Initialiaze the interrupt vectors
-.f806	8d fb 7e	sta $7efb	        STA     NMIVEC+1        ; User program at ENTRY_POINT may change
-.f809	8d ff 7e	sta $7eff	        STA     IRQVEC+1	; these vectors.  Just do change before enabling
-.f80c	a9 00		lda #$00	        LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-.f80e	8d fa 7e	sta $7efa	        STA     NMIVEC
-.f811	8d fe 7e	sta $7efe	        STA     IRQVEC
-.f814	20 26 f8	jsr $f826			JSR		INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-.f817	a9 2a		lda #$2a	ECHO	LDA		#'*'
-.f819	20 45 f8	jsr $f845			JSR		FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
-.f81c	20 76 f8	jsr $f876	ECHO2	JSR		FIFOIN
-.f81f	90 fb		bcc $f81c			BCC		ECHO2		; Wait for an incoming character
-.f821	20 45 f8	jsr $f845			JSR		FIFOOUT
-.f824	80 f6		bra $f81c			BRA		ECHO2
-.f826					INITVIA
-.f826	9c ec 7f	stz $7fec			STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
-.f829	9c eb 7f	stz $7feb			STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
-.f82c	9c e3 7f	stz $7fe3			STZ		SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
-.f82f	9c e2 7f	stz $7fe2			STZ		SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
-.f832	a9 08		lda #$08			LDA		#FIFO_RD				;
-.f834	8d e0 7f	sta $7fe0			STA		SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-.f837	a9 0c		lda #$0c			LDA		#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
-.f839	8d e2 7f	sta $7fe2			STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
-.f83c	ea		nop				NOP								; FIXME: Defensive and possibly unnecessary
-.f83d					FIFOPWR:
-.f83d	ad e0 7f	lda $7fe0			LDA		SYSTEM_VIA_IORB
-.f840	29 20		and #$20			AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
-.f842	d0 f9		bne $f83d			BNE		FIFOPWR
-.f844	60		rts				RTS
-.f845					FIFOOUT
-.f845	85 08		sta $08				STA		TEMP			; save output character
-.f847	ad e0 7f	lda $7fe0			LDA		SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
-.f84a	29 01		and #$01			AND 	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-.f84c	f0 03		beq $f851			BEQ		OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-.f84e	18		clc				CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
-.f84f	80 24		bra $f875			BRA OFX1				; And quit.  Caller is responsible for re-trying the failed call
-.f851					OFCONT1
-.f851	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
-.f854	a9 08		lda #$08			LDA	#FIFO_RD			; RD=1 WR=0 (WR must go 1->0 for FIFO write)
-.f856	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
-.f859	a9 ff		lda #$ff			LDA	#$FF				; make Port A all outputs
-.f85b	8d e3 7f	sta $7fe3			STA	SYSTEM_VIA_DDRA		; Save data to output latches
-.f85e	a5 08		lda $08				LDA	TEMP
-.f860	8d e1 7f	sta $7fe1			STA	SYSTEM_VIA_IORA		; Write output value to output latches
-.f863	ea		nop				NOP						; Some settling time of data output just to be safe
-.f864	ea		nop				NOP
-.f865	a9 08		lda #$08			LDA	#(MASK3)			; RD=1 WR=0
-.f867	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
-.f86a	ea		nop				NOP						; Hold time following write strobe, to ensure value is latched OK
-.f86b	ea		nop				NOP
-.f86c	a9 0c		lda #$0c			LDA	#(MASK3 + MASK2)
-.f86e	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
-.f871	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-.f874	38		sec				SEC						; signal success to caller
-.f875	60		rts		OFX1:	RTS
-.f876	ad e0 7f	lda $7fe0	FIFOIN	LDA		SYSTEM_VIA_IORB	; Check RXF flag
-.f879	29 02		and #$02			AND		#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
-.f87b	f0 03		beq $f880			BEQ 	FIHASC			; If taken, FIFO has data to read in
-.f87d	18		clc				CLC
-.f87e	80 19		bra $f899			BRA		INFXIT
-.f880	9c e3 7f	stz $7fe3	FIHASC	STZ		SYSTEM_VIA_DDRA		; Make Port A inputs
-.f883	a9 08		lda #$08			LDA		#FIFO_RD
-.f885	8d e0 7f	sta $7fe0			STA		SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
-.f888	ea		nop				NOP
-.f889	9c e0 7f	stz $7fe0			STZ		SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A
-.f88c	ea		nop				NOP
+.f800	78		sei		START   	SEI                     ; disable interrupts
+.f801	d8		cld		        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+.f802	a2 ff		ldx #$ff	        	LDX     #$FF            ; Set up the stack pointer
+.f804	9a		txs		        	TXS                     ;       "
+.f805	a9 f8		lda #$f8	        	LDA     #>START      	; Initialiaze the interrupt vectors
+.f807	8d fb 7e	sta $7efb	        	STA     NMIVEC+1        ; User program at ENTRY_POINT may change
+.f80a	8d ff 7e	sta $7eff	        	STA     IRQVEC+1	; these vectors.  Just do change before enabling
+.f80d	a9 00		lda #$00	        	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+.f80f	8d fa 7e	sta $7efa	        	STA     NMIVEC
+.f812	8d fe 7e	sta $7efe	        	STA     IRQVEC
+.f815	20 27 f8	jsr $f827			JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+.f818	a9 2a		lda #$2a	ECHO		LDA	#'*'
+.f81a	20 46 f8	jsr $f846			JSR	FIFOOUT		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
+.f81d	20 77 f8	jsr $f877	ECHO2		JSR	FIFOIN
+.f820	90 fb		bcc $f81d			BCC	ECHO2		; Wait for an incoming character
+.f822	20 46 f8	jsr $f846			JSR	FIFOOUT
+.f825	80 f6		bra $f81d			BRA	ECHO2
+.f827					INITVIA
+.f827	9c ec 7f	stz $7fec			STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
+.f82a	9c eb 7f	stz $7feb			STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+.f82d	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
+.f830	9c e2 7f	stz $7fe2			STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
+.f833	a9 08		lda #$08			LDA	#FIFO_RD				;
+.f835	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
+.f838	a9 0c		lda #$0c			LDA	#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
+.f83a	8d e2 7f	sta $7fe2			STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
+.f83d	ea		nop				NOP								; FIXME: Defensive and possibly unnecessary
+.f83e					FIFOPWR:
+.f83e	ad e0 7f	lda $7fe0			LDA	SYSTEM_VIA_IORB
+.f841	29 20		and #$20			AND	#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+.f843	d0 f9		bne $f83e			BNE	FIFOPWR
+.f845	60		rts				RTS
+.f846	85 08		sta $08		FIFOOUT 	STA	TEMP			; save output character
+.f848	ad e0 7f	lda $7fe0			LDA	SYSTEM_VIA_IORB	; Read in FIFO status Port for FIFO
+.f84b	29 01		and #$01			AND         #FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+.f84d	f0 03		beq $f852			BEQ	OFCONT1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+.f84f	18		clc				CLC						; Tell caller the character in A was NOT sent b/c FIFO is full
+.f850	80 24		bra $f876			BRA 	OFX1				; And quit.  Caller is responsible for re-trying the failed call
+.f852					OFCONT1
+.f852	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
+.f855	a9 0c		lda #$0c			LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+.f857	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
+.f85a	a9 ff		lda #$ff			LDA	#$FF				; make Port A all outputs
+.f85c	8d e3 7f	sta $7fe3			STA	SYSTEM_VIA_DDRA		; Save data to output latches
+.f85f	a5 08		lda $08				LDA	TEMP
+.f861	8d e1 7f	sta $7fe1			STA	SYSTEM_VIA_IORA		; Write output value to output latches
+.f864	ea		nop				NOP						; Some settling time of data output just to be safe
+.f865	ea		nop				NOP
+.f866	a9 08		lda #$08			LDA	#(MASK3)			; RD=1 WR=0
+.f868	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
+.f86b	ea		nop				NOP						; Hold time following write strobe, to ensure value is latched OK
+.f86c	ea		nop				NOP
+.f86d	a9 08		lda #$08			LDA	#FIFO_RD		; RD=1, WR=0
+.f86f	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; return to IDLE state (RD=1, WR=0)
+.f872	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+.f875	38		sec				SEC						; signal success to caller
+.f876	60		rts		OFX1:	  	RTS
+.f877	ad e0 7f	lda $7fe0	FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
+.f87a	29 02		and #$02			AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
+.f87c	f0 03		beq $f881			BEQ 	FIHASC			; If taken, FIFO has data to read in
+.f87e	18		clc				CLC
+.f87f	80 19		bra $f89a			BRA	INFXIT
+.f881	9c e3 7f	stz $7fe3	FIHASC		STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
+.f884	a9 08		lda #$08			LDA	#FIFO_RD
+.f886	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+.f889	ea		nop				NOP
+.f88a	9c e0 7f	stz $7fe0			STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A
 .f88d	ea		nop				NOP
-.f88e	ad e1 7f	lda $7fe1			LDA		SYSTEM_VIA_IORA			; read data in
-.f891	48		pha				PHA
-.f892	a9 08		lda #$08			LDA		#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
-.f894	8d e0 7f	sta $7fe0			STA		SYSTEM_VIA_IORB
-.f897	68		pla				PLA
-.f898	38		sec				SEC							; we bot a byte!
-.f899	60		rts		INFXIT	RTS
-.f89a	6c fe 7e	jmp ($7efe)	GOIRQ	jmp	(IRQVEC)
-.f89d	6c fa 7e	jmp ($7efa)	GONMI	jmp	(NMIVEC)
-.f8a0	4c 00 f8	jmp $f800	GORST	jmp	START		; Allowing user program to change this is a mistake
->fffa	9d f8				NMIENT  .word     GONMI
->fffc	a0 f8				RSTENT  .word     GORST
->fffe	9a f8				IRQENT  .word     GOIRQ
+.f88e	ea		nop				NOP
+.f88f	ad e1 7f	lda $7fe1			LDA	SYSTEM_VIA_IORA			; read data in
+.f892	48		pha				PHA
+.f893	a9 08		lda #$08			LDA	#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+.f895	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB
+.f898	68		pla				PLA
+.f899	38		sec				SEC							; we bot a byte!
+.f89a	60		rts		INFXIT		RTS
+.f89b	6c fe 7e	jmp ($7efe)	GOIRQ		jmp	(IRQVEC)
+.f89e	6c fa 7e	jmp ($7efa)	GONMI		jmp	(NMIVEC)
+.f8a1	4c 00 f8	jmp $f800	GORST		jmp	START		; Allowing user program to change this is a mistake
+>fffa	9e f8				NMIENT  .word     GONMI
+>fffc	a1 f8				RSTENT  .word     GORST
+>fffe	9b f8				IRQENT  .word     GOIRQ
 
 ;******  End of listing
