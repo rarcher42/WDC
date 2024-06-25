@@ -116,42 +116,55 @@ SPAMLOOP
 	jsr	WASTETM
 	bra	SPAMLOOP
 
+PB2 = MASK2
+PB3 = MASK3
+PB5 = MASK5
+
+FIFO_WR = PB2
+FIFO_RD = PB3
+FIFO_PWREN = PB5
+
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
 INITVIA
-	STZ 	SYSTEM_VIA_ACR	; Disable PB7, shift register, timer T1 interrupt.
-	STZ     SYSTEM_VIA_PCR	; Make sure CB2 floats so it doesn't interfere with flash bank#
-	STZ	SYSTEM_VIA_DDRA	; All inputs PA0-PA7 (but we can write to output reg.)
-	LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
-	STA	SYSTEM_VIA_DDRB	
+	STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
+	STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.
+	STZ		SYSTEM_VIA_DDRA			; All inputs PA0-PA7 (but we can write to output reg.)
+	STZ		SYSTEM_VIA_DDRB			; Port B is only guaranteed an input if this was called from RESET
+	LDA		#FIFO_RD			;
+	STA		SYSTEM_VIA_IOB			; Set output register so we start life with FIFO RD=1, WR=0 (FIFO idle)
+	LDA		#(FIFO_RD + FIFO_WR)	; Outputs:  PB2 (FIFO WR strobe), PB3 (FIFO RD strobe)
+	STA		SYSTEM_VIA_DDRB			; FIFO read and write strobe pins are now outputs, RD=1, WR=0 (IDLE) state initially
 	; Wait for FTDI chip to be initialized (PWRENB is 0)
-	; FIXME: add timeout
-WAIT245	LDA	SYSTEM_VIA_IOB
-	AND	#MASK5			; PB5 = PWRENB. 0=enabled 1=disabled
-	BNE	WAIT245	
-        RTS
+	NOP								; FIXME: Defensive and massive overkill.  Await pin direction change stable
+	NOP
+	NOP
+	NOP
+FIFOPWR:
+	; FIXME: Add timeout here
+	LDA		SYSTEM_VIA_IOB
+	AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+	BNE		FIFOPWR	
+    RTS
 ;
 
 ; Raw FIFO output.  Use with caution as there's no flow control.  This works as long as 
 ; the FIFO has room.  Check that before calling this function.
-OUTFIFO	STA	TEMP			; save output character
-	STZ	SYSTEM_VIA_DDRA		; Make Port A an input (for the moment)
-	LDA	#(MASK2 + MASK3 + MASK4)	; PB2-4 are outputs, rest are inputs
-	STA	SYSTEM_VIA_DDRB	
-	LDA	#(MASK3 + MASK2)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
-	STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
-	NOP
-	NOP
-	NOP
+OUTFIFO	
+	STA	TEMP				; save output character
+	; Step 1: Set Port A to receive data from FIFO
+	STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
 	
-	LDA	#$FF			; make Port A all outputs
-	STA	SYSTEM_VIA_DDRA		; Now the output latches are on FIFO bus
+	LDA	#FIFO_RD			; RD=1 WR=0 (WR must go 1->0 for FIFO write)
+	STA	SYSTEM_VIA_IOB		; Make sure write is high (and read too!)
+	LDA	#$FF				; make Port A all outputs
+	STA	SYSTEM_VIA_DDRA		; Save data to output latches
 	LDA	TEMP
 	STA	SYSTEM_VIA_IOA		; Write output value to output latches 
 	NOP
+	NOP						; FIXME
 	NOP
-	NOP
-	NOP				; excessive settle time.  FIMXE, probably at most 1 req'd
+	NOP						; excessive settle time.  FIMXE, probably at most 1 req'd
 	; Now the data's stable on PA0-7, pull WR line low (leave RD high)
 	LDA	#(MASK3)		; RD=1 WR=0
 	STA	SYSTEM_VIA_IOB		; Low-going WR pulse should latch data

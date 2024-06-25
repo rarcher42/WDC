@@ -1,7 +1,7 @@
 import serial
 import time
 class WDC_talker:
-    def __init__(self, port='COM4', b=1200, parity=serial.PARITY_NONE, size=serial.EIGHTBITS,
+    def __init__(self, port='COM18', b=1200, parity=serial.PARITY_NONE, size=serial.EIGHTBITS,
                  stops=serial.STOPBITS_ONE, to=3.0):
         try:
             self.ser = serial.Serial(port=port, baudrate=b, parity=parity,
@@ -11,6 +11,24 @@ class WDC_talker:
             print("Error opening port")
             self.open = False
 
+    def receive(self):
+        rx = b''
+        data = True
+        print("receiving...")
+        while data:
+            try:
+                b = self.ser.read(1)
+                if b != b'':
+                    rx += b
+                else:
+                    data = False
+            except:
+                data = False
+        print("Done receiving")
+        print("rx=", rx)
+        return rx
+
+
     def _get_attention(self, tries=10):
         synced = False
         ok = False
@@ -18,6 +36,7 @@ class WDC_talker:
             tries -= 1
             self.ser.write(b'\x55')
             self.ser.write(b'\xAA')
+            self.ser.flush()
             try:
                 a = self.ser.read(1)
                 if a == b'\xCC':
@@ -36,20 +55,18 @@ class WDC_talker:
         if self._get_attention(tries) is True:
             print("Ready to insert command byte!")
             self.ser.write(cmd)
+            self.ser.flush()
             print("CMD sent")
         else:
             print("Could not gain attention of controller board")
 
     def _read(self):
-        self.ser.write(b'\xF0')
-        self.ser.write(b'\xFF')
-        self.ser.write(b'\x00')
-
-        self.ser.write(b'\x20')
-        self.ser.write(b'\x00')
+        msg = b'\x55\xAA\0x3\xF0\xFF\x00\x20\x00'
+        self.ser.write(msg)
+        self.ser.flush()
         time.sleep(2.0)
-        m = self.ser.read(32)
-        print(m, len(m))
+        rx = self.ser.read(32)
+        print(rx, len(rx))
 
     def read(self, sa, ea):
         assert type(sa) is int
@@ -80,8 +97,9 @@ class WDC_talker:
 
 
 if __name__ == "__main__":
-
-    toytalk = WDC_talker('COM4', 1200, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 3.0)
+    SERIAL_PORT = "COM18"
+    toytalk = WDC_talker(SERIAL_PORT, 1200, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 3.0)
     print(toytalk)
-    toytalk._send_command(b'\x03', 10)
     toytalk._read()
+    #toytalk._send_command(b'\x03', 10)
+    #toytalk._read()
