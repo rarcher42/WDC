@@ -87,31 +87,11 @@ START   	SEI                     ; disable interrupts
         	STA     IRQVEC
 			JSR		INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
 			JSR		INITSER
-			
-			LDA		#'*'
-			JSR		FIFOOUT
-			LDA		#'6'
-			JSR		FIFOOUT
-			LDA		#'9'
-			JSR		FIFOOUT
-ECHO		JSR		FIFOIN
+ECHO			JSR		FIFOIN
 			BCC		ECHO		; Wait for an incoming character
 			JSR		FIFOOUT
 			BRA		ECHO
 			
-			LDA		#'*'
-E1			JSR		PUTSER		; Just send something in case FIFOIN hangs so we know we got this far FIXME: remove this
-			BCC		E1
-			LDA		#'6'
-E2			JSR		PUTSER
-			BCC		E2
-			LDA		#'9'
-E3			JSR 	PUTSER
-			BCC		E3
-ECHO2		JSR		FIFOIN
-			BCC		ECHO2		; Wait for an incoming character
-			JSR		FIFOOUT
-			BRA		ECHO2
 
 ; Serial functions
 ; Set up baud rate, parity, stop bits, interrupt control, etc. for
@@ -133,7 +113,7 @@ GETSER 		LDA     SSR    		; look at serial status
 			BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
 			LDA    	SDR     	; get the character
 			SEC					; Signal receipt of character
-GSXIT1		RTS	
+GSXIT1			RTS	
  
 ; Uses X as temporary storage, so it's saved
 ; A is preserved 
@@ -142,7 +122,7 @@ PUTSER		PHX
 			PHA
 			TAX					; save output character in X		
 			LDA		SSR	
-			AND 	#TX_RDY	
+			AND 		#TX_RDY	
 			CLC
 			BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
 			STX		SDR			; send the character	
