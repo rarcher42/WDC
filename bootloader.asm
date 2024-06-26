@@ -75,22 +75,22 @@ IRQVEC   =      $7EFE   ; write IRQ vector here
 
 
 *= $F800							; Monitor start address
-START   	SEI                     ; disable interrupts
-        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-        	LDX     #$FF            ; Set up the stack pointer
-        	TXS                     ;       "
-        	LDA     #>START      	; Initialiaze the interrupt vectors
-        	STA     NMIVEC+1        ; User program at ENTRY_POINT may change
-        	STA     IRQVEC+1	; these vectors.  Just do change before enabling
-        	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-        	STA     NMIVEC
-        	STA     IRQVEC
-			JSR		INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
-			JSR		INITSER
-ECHO			JSR		FIFOIN
-			BCC		ECHO		; Wait for an incoming character
-			JSR		FIFOOUT
-			BRA		ECHO
+START   		SEI                     ; disable interrupts
+        		CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+        		LDX    	#$FF            ; Set up the stack pointer
+        		TXS                     ;       "
+        		LDA     #>START      	; Initialiaze the interrupt vectors
+        		STA     NMIVEC+1        ; User program at ENTRY_POINT may change
+        		STA     IRQVEC+1	; these vectors.  Just do change before enabling
+        		LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+        		STA     NMIVEC
+        		STA     IRQVEC
+			JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+			JSR	INITSER
+ECHO			JSR	FIFOIN
+			BCC	ECHO		; Wait for an incoming character
+			JSR	FIFOOUT
+			BRA	ECHO
 			
 
 ; Serial functions
