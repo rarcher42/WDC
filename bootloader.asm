@@ -21,7 +21,7 @@ TEMP 		=   $F0     ; save hex value
 
 ; 65C51 ACIA equates for serial I/O
 ;
-ACIA_BASE	= 	$7F30		; This is where the 6551 ACIA starts
+ACIA_BASE = $7F30		; This is where the 6551 ACIA starts
 SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
 SSR = ACIA_BASE+1     		; Serial data status register
 SCMD = ACIA_BASE+2     		; Serial command reg. ()
@@ -85,49 +85,50 @@ START   		SEI                     ; disable interrupts
         		LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
         		STA     NMIVEC
         		STA     IRQVEC
-			JSR	INITVIA		; Set up 65C22 to FIFO interface chip (and ROM bank select)
+			JSR	INITFIFO	; Set up 65C22 to FIFO interface chip (and ROM bank select)
 			JSR	INITSER
-ECHO			JSR	FIFOIN
-			BCC	ECHO		; Wait for an incoming character
-			JSR	FIFOOUT
+ECHO			JSR	GETCHA		; get chaacter from primary interface
+			BCS	ECHO		; Wait for an incoming character
+			JSR	PUTCHA
 			BRA	ECHO
 			
 
 ; Serial functions
 ; Set up baud rate, parity, stop bits, interrupt control, etc. for
 ; the serial port.
-INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+INITSER 		LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
 			STA 	SCTL		
 			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
 			STA     SCMD
 			RTS
 
 ; Call to get the next waiting serial character. 
-; Returns carry flag set if character was read.  Character will be in A
-; Returns carry clear (C=0) if no character is waiting
+; Returns carry flag clear if character was read.  Character will be in A
+; Returns carry set (C=1) if no character is waiting
 ; A and flags are destroyed (obviously)
-
-GETSER 		LDA     SSR    		; look at serial status
+GETCHB  		LDA     SSR    		; look at serial status
 			AND     #RX_RDY 	; see if anything is ready
-			CLC					; signal no character waiting
-			BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
+			SEC					; signal no character waiting
+		  	BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
 			LDA    	SDR     	; get the character
-			SEC					; Signal receipt of character
+			CLC			; Signal receipt of character
 GSXIT1			RTS	
  
 ; Uses X as temporary storage, so it's saved
 ; A is preserved 
 ; Save A because this allows for multiple calls until transmitter is ready (kludge-mode)
-PUTSER		PHX
+; Upon exit, if Carry flag = 0 (clear) the character was queued for transmission.
+;            if Carry flag = 1 (set) then you'll have to re-try it.
+PUTCHB			PHX
 			PHA
 			TAX					; save output character in X		
 			LDA		SSR	
 			AND 		#TX_RDY	
-			CLC
+			SEC				; assume no room if branch taken	
 			BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
 			STX		SDR			; send the character	
-			SEC					; indicate success
-PSXIT1		PLA
+			CLC					; indicate success
+PSXIT1			PLA
 			PLX
 			RTS
 
@@ -158,8 +159,7 @@ PSXIT1		PLA
 ;
 ;
 ; 
-INITVIA
-		STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
+INITFIFO   	STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
 		STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
 		STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
 		STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
@@ -178,14 +178,14 @@ FIFOPWR:
 ;
 
 ; Attempt to output the byte in A.
-; If successful, the carry flag will be SET
-; If the FIFO is full, it will return immediately with the carry clear.
+; If successful, the carry flag will be Clear (C=0) 
+; If the FIFO is full, it will return immediately with the carry set (C=1)
 ; Caller is responsible for checking the carry flag with BCC or BCS 
-; and re-trying if carry is set.
-FIFOOUT 	STA	TEMP			; save output character
+; and re-trying if carry is clear.
+PUTCHA  	STA	TEMP			; save output character
 		LDA	SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
 		AND	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-		CLC
+		SEC				; FIFO is full, so don't try to queue it!	
 		BNE	OFX1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 		; FIFO has room - write A to FIFO in a series of steps
 OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating 
@@ -207,17 +207,17 @@ OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
 		NOP
 		NOP
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-		SEC				; signal success of write to caller
+		CLC				; signal success of write to caller
 OFX1	  	RTS
 ;
 ;
 ;
-; On return:
-; If Carry flag is set, A contains the next byte from the FIFO
-; If carry flag is clear, there were no characters waiting
-FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
+; On exit:
+; If Carry flag is clear, A contains the next byte from the FIFO
+; If carry flag is set, there were no characters waiting
+GETCHA		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
-		CLC
+		SEC
 		BNE 	INFXIT			; If RXF is 1, then no character is waiting!
 		STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
 		LDA	#FIFO_RD
@@ -233,7 +233,7 @@ FIFOIN		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		LDA	#FIFO_RD		; Restore back to inactive signals RD=1 and WR=0
 		STA	SYSTEM_VIA_IORB
 		PLA
-		SEC				; we got a byte!
+		CLC				; we got a byte!
 INFXIT		RTS
 
 
