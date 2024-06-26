@@ -17,6 +17,7 @@ class WDC_tester:
         error_count = 0
         print("Sending %d 8192 byte blocks of random data from 0x00-0xFF at " % n)
         print("230400 baud, n, 8, 1")
+        start_time = time.time()
         for i in range(n):
             print("Sending block#%d" % (i+1))
             outblock = random.randbytes(8192)
@@ -32,9 +33,14 @@ class WDC_tester:
             else:
                 print("\t\tMatch: False")
                 error_count += 1
+        elapsed = time.time() - start_time
         print("\n%d attempts" % n)
         print("%d OK" % ok_count)
         print("%d FAILED" % error_count)
+        num = 8192 * n
+        print("%d bytes in %f seconds" % (num, elapsed))
+        print("Throughput = %.2f bytes/sec" % (float(num)/elapsed))
+
         return
 
 if __name__ == "__main__":
