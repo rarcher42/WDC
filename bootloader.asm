@@ -75,63 +75,23 @@ IRQVEC   =      $7EFE   ; write IRQ vector here
 
 
 *= $F800							; Monitor start address
-START   		SEI                     ; disable interrupts
-        		CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-        		LDX    	#$FF            ; Set up the stack pointer
-        		TXS                     ;       "
-        		LDA     #>START      	; Initialiaze the interrupt vectors
-        		STA     NMIVEC+1        ; User program at ENTRY_POINT may change
-        		STA     IRQVEC+1	; these vectors.  Just do change before enabling
-        		LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-        		STA     NMIVEC
-        		STA     IRQVEC
-			JSR	INITFIFO	; Set up 65C22 to FIFO interface chip (and ROM bank select)
-			JSR	INITSER
-ECHO			JSR	GETCHA		; get chaacter from primary interface
-			BCS	ECHO		; Wait for an incoming character
-			JSR	PUTCHA
-			BRA	ECHO
+START   	SEI                     ; disable interrupts
+        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+        	LDX    	#$FF            ; Set up the stack pointer
+        	TXS                     ;       "
+        	LDA     #>START      	; Initialiaze the interrupt vectors
+        	STA     NMIVEC+1        ; User program at ENTRY_POINT may change
+        	STA     IRQVEC+1	; these vectors.  Just do change before enabling
+        	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
+        	STA     NMIVEC
+        	STA     IRQVEC
+		JSR	INITFIFO	; Set up 65C22 to FIFO interface chip (and ROM bank select)
+		JSR	INITSER
+ECHO		JSR	GETCHA		; get chaacter from primary interface
+		BCS	ECHO		; Wait for an incoming character
+		JSR	PUTCHA
+		BRA	ECHO
 			
-
-; Serial functions
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
-; the serial port.
-INITSER 		LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-			STA 	SCTL		
-			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-			STA     SCMD
-			RTS
-
-; Call to get the next waiting serial character. 
-; Returns carry flag clear if character was read.  Character will be in A
-; Returns carry set (C=1) if no character is waiting
-; A and flags are destroyed (obviously)
-GETCHB  		LDA     SSR    		; look at serial status
-			AND     #RX_RDY 	; see if anything is ready
-			SEC					; signal no character waiting
-		  	BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
-			LDA    	SDR     	; get the character
-			CLC			; Signal receipt of character
-GSXIT1			RTS	
- 
-; Uses X as temporary storage, so it's saved
-; A is preserved 
-; Save A because this allows for multiple calls until transmitter is ready (kludge-mode)
-; Upon exit, if Carry flag = 0 (clear) the character was queued for transmission.
-;            if Carry flag = 1 (set) then you'll have to re-try it.
-PUTCHB			PHX
-			PHA
-			TAX					; save output character in X		
-			LDA		SSR	
-			AND 		#TX_RDY	
-			SEC				; assume no room if branch taken	
-			BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
-			STX		SDR			; send the character	
-			CLC					; indicate success
-PSXIT1			PLA
-			PLX
-			RTS
-
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
 ; On exit:
@@ -235,6 +195,45 @@ GETCHA		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		PLA
 		CLC				; we got a byte!
 INFXIT		RTS
+
+; Serial functions
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+		STA 	SCTL		
+		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+		STA     SCMD
+		RTS
+
+; Call to get the next waiting serial character. 
+; Returns carry flag clear if character was read.  Character will be in A
+; Returns carry set (C=1) if no character is waiting
+; A and flags are destroyed (obviously)
+GETCHB  	LDA     SSR    		; look at serial status
+		AND     #RX_RDY 	; see if anything is ready
+		SEC					; signal no character waiting
+	  	BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
+		LDA    	SDR     	; get the character
+		CLC			; Signal receipt of character
+GSXIT1		RTS	
+ 
+; Uses X as temporary storage, so it's saved
+; A is preserved 
+; Save A because this allows for multiple calls until transmitter is ready (kludge-mode)
+; Upon exit, if Carry flag = 0 (clear) the character was queued for transmission.
+;            if Carry flag = 1 (set) then you'll have to re-try it.
+PUTCHB		PHX
+		PHA
+		TAX					; save output character in X		
+		LDA		SSR	
+		AND 		#TX_RDY	
+		SEC				; assume no room if branch taken	
+		BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
+		STX		SDR			; send the character	
+		CLC					; indicate success
+PSXIT1		PLA
+		PLX
+		RTS
 
 
 
