@@ -19,7 +19,7 @@ class WDC_tester:
         print("230400 baud, n, 8, 1")
         start_time = time.time()
         for i in range(n):
-            print("Sending block#%d" % (i+1))
+            print("Sending block#%d - %d OK %d FAIL" % ((i+1), ok_count, error_count))
             outblock = random.randbytes(8192)
             print("\t", str(outblock[0:10])+"......"+str(outblock[-11:-1]))
             self.ser.write(outblock)
@@ -47,6 +47,4 @@ if __name__ == "__main__":
     SERIAL_PORT = "COM17"
     toy = WDC_tester(SERIAL_PORT, 230400, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 3.0)
     print(toy)
-    toy.stresstest(10)
-    #toytalk._send_command(b'\x03', 10)
-    #toytalk._read()
+    toy.stresstest(100)
