@@ -16,31 +16,34 @@ MASK6	=	 %01000000
 MASK7	=	 %10000000
 
 ; Zero page storage map
-DP_START =	$20
-DPL	=	DP_START
-DPH	=	DP_START+1
-CNTL	=	DP_START+2
-CNTH	=	DP_START+3
-TEMP 	=   	DP_START+4
+* = $20
+DP_START	.byte	?
+PTR_L		.byte	?
+PTR_H		.byte	?
+PTR_B		.byte	?
+CTR_L		.byte	?
+CTR_H		.byte	?
+TEMP 	  	.byte	?
 
 ; TIDE2VIA	the system VIA.  Used by many and defined globally
 ; IO for the VIA which is used for the USB debugger interface.
-SYSTEM_VIA_IORB     = $7FE0 ; Port B IO register
-SYSTEM_VIA_IORA     = $7FE1 ; Port A IO register
-SYSTEM_VIA_DDRB     = $7FE2 ; Port B data direction register
-SYSTEM_VIA_DDRA     = $7FE3 ; Port A data direction register
-SYSTEM_VIA_T1C_L    = $7FE4 ; Timer 1 counter/latches, low-order
-SYSTEM_VIA_T1C_H    = $7FE5 ; Timer 1 high-order counter
-SYSTEM_VIA_T1L_L    = $7FE6 ; Timer 1 low-order latches
-SYSTEM_VIA_T1L_H    = $7FE7 ; Timer 1 high-order latches
-SYSTEM_VIA_T2C_L    = $7FE8 ; Timer 2 counter/latches, lower-order
-SYSTEM_VIA_T2C_H    = $7FE9 ; Timer 2 high-order counter
-SYSTEM_VIA_SR       = $7FEA ; Shift register
-SYSTEM_VIA_ACR      = $7FEB ; Auxilliary control register
-SYSTEM_VIA_PCR      = $7FEC ; Peripheral control register
-SYSTEM_VIA_IFR		= $7FED ; Interrupt flag register
-SYSTEM_VIA_IER      = $7FEE ; Interrupt enable register
-SYSTEM_VIA_ORA_IRA	= $7FEF ; Port A IO register, but no handshake
+SYS_VIA_BASE	    = $7FE0
+SYSTEM_VIA_IORB     =  	SYS_VIA_BASE+0	; Port B IO register
+SYSTEM_VIA_IORA     =	SYS_VIA_BASE+1 	; Port A IO register
+SYSTEM_VIA_DDRB     = 	SYS_VIA_BASE+2	; Port B data direction register
+SYSTEM_VIA_DDRA     = 	SYS_VIA_BASE+3	; Port A data direction register
+SYSTEM_VIA_T1C_L    =	SYS_VIA_BASE+4 	; Timer 1 counter/latches, low-order
+SYSTEM_VIA_T1C_H    = 	SYS_VIA_BASE+5	; Timer 1 high-order counter
+SYSTEM_VIA_T1L_L    = 	SYS_VIA_BASE+6	; Timer 1 low-order latches
+SYSTEM_VIA_T1L_H    = 	SYS_VIA_BASE+7	; Timer 1 high-order latches
+SYSTEM_VIA_T2C_L    = 	SYS_VIA_BASE+8	; Timer 2 counter/latches, lower-order
+SYSTEM_VIA_T2C_H    = 	SYS_VIA_BASE+9	; Timer 2 high-order counter
+SYSTEM_VIA_SR       = 	SYS_VIA_BASE+10	; Shift register
+SYSTEM_VIA_ACR      = 	SYS_VIA_BASE+11	; Auxilliary control register
+SYSTEM_VIA_PCR      =	SYS_VIA_BASE+12	; Peripheral control register
+SYSTEM_VIA_IFR	    =	SYS_VIA_BASE+13 ; Interrupt flag register
+SYSTEM_VIA_IER      = 	SYS_VIA_BASE+14	; Interrupt enable register
+SYSTEM_VIA_ORA_IRA  =	SYS_VIA_BASE+15	; Port A IO register, but no handshake
 ; System VIA Port B named bitmasks
 PB0 = MASK0
 PB1 = MASK1
@@ -66,13 +69,13 @@ OUTMSG		LDX	#>ENTRYMSG
 		JSR	PUTCRLF
 		; Set up a test memory dump - dump a couple pages from flash
 		LDA	#$F8
-		STA	DPH
+		STA	PTR_H
 		LDA	#$00
-		STA	DPL
+		STA	PTR_L
 		LDA	#>512
-		STA	CNTH
+		STA	CTR_H
 		LDA	#<512
-		STA	CNTL
+		STA	CTR_L
 		JSR	DUMPHEX
 		LDX	#>ECHOTEST
 		LDY	#<ECHOTEST
@@ -83,30 +86,78 @@ ECHO		JSR	GETCHA
 		BCS	ECHO
 		JSR	PUTCH
 		BRA	ECHO
-					
-DUMPHEX		JSR	PUTCRLF
-		LDA	DPH
+;
+;
+; Basic 24 bit operations FIXME: (currently only 16)
+PR_ADDR		LDA	PTR_H
 		JSR	PUTHEX
-		LDA	DPL
+		LDA	PTR_L
 		JSR	PUTHEX
 		LDA	#':'
-		JSR	PUTCH
+		JMP	PUTCH
+
+INC_PTR		INC	PTR_L		; point to the next byte
+		BNE	IPXIT1	
+		INC	PTR_H	
+IPXIT1		RTS
+
+; Decrement counter until it's zero.  Z is set if final count (0) has been reached
+DEC_CTR		LDA	CTR_L
+		BNE	DCC_C1		; No borrow if > 0 
+		; Borrow pending if not already at $0000
+		LDA	CTR_H
+		BEQ	DCXIT2		; already zero; don't decrement
+		; Need to borrow one from high byte
+		DEC	CTR_H		; Borrow because CTR_L will be 0xFF after dec below
+DCC_C1		DEC	CTR_L
+DCXIT1		LDA	CTR_H		; set zero flag on exit
+		ORA	CTR_L
+DCXIT2		RTS
+
+RD_BYTE		LDA	(PTR_L)
+		RTS			; FIXME: write as a macro
+
+WR_BYTE		STA	(PTR_L)		; FIXME: write as a macro
+		RTS	
+
+
+
+; Basic conversions	
+GETHEX  	JSR     GETSER
+        	JSR     MKNIBL  	; Convert to 0..F numeric
+        	ASL     A
+        	ASL     A
+        	ASL     A
+        	ASL     A       	; This is the upper nibble
+        	AND     #$F0
+        	STA     TEMP
+        	JSR     GETSER
+        	JSR     MKNIBL
+        	ORA    	TEMP
+        	RTS 
+           	; 
+; Convert the ASCII nibble to numeric value from 0-F:
+MKNIBL  	CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
+        	BCC     MKNNH   	; If we borrowed, we lost the carry so 0..9
+        	SBC     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
+        	; If we fall through, carry is set unlike direct entry at MKNNH
+MKNNH   	SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
+        	AND     #$0F    	; no upper nibble no matter what
+        	RTS             	; and return the nibble
+
+			
+DUMPHEX		JSR	PUTCRLF
+		JSR	PR_ADDR
 		JSR	PUTSP
-NXTBYTE		LDA	(DPL)		; Get next byte
+NXTBYTE		JSR	RD_BYTE		; Get byte at (PTR) 
 		JSR	PUTHEX
 		JSR	PUTSP
 		; Update count
-		DEC	CNTL
-		BNE	CHKEOD
-		DEC	CNTH
-CHKEOD		LDA	CNTL
-		ORA	CNTH
+		JSR	DEC_CTR
 		BEQ 	DUMPHX1
 		; increment data pointer
-		INC	DPL		; point to the next byte
-		BNE	CHKEOL	
-		INC	DPH
-CHKEOL		LDA	DPL
+		JSR	INC_PTR
+CHKEOL		LDA	PTR_L
 		AND	#$0F		; Look at next address to write
 		BNE	NXTBYTE		; inter-line byte, so continue dumping
 		BRA	DUMPHEX		; Start a new line
@@ -172,6 +223,7 @@ SERRDY		LDA	SSR
 		AND	#RX_RDY
 		RTS			; 0 = no byte ready
 
+; Be careful.  This will busy wait forever and isn't sound for producction use
 GETSER		JSR	SERRDY		; Since we're busy waiting, JSR overhead is fine :)	
 		BEQ	GETSER
 		LDA	SDR
@@ -182,14 +234,14 @@ PUTSP		LDA	#' '
 		RTS
 ; Print the string at *(X, Y) (8 bit mode)  Re-write as I learn to use just *(X)
 ; 8 bit emulation mode
-PRINTXY		STX	DPH		; Save the address in direct page pointer@DPL
-		STY	DPL
-PRINTLP1	LDA	(DPL)
+PRINTXY		STX	PTR_H		; Save the address in direct page pointer@PTR
+		STY	PTR_L
+PRINTLP1	LDA	(PTR_L)
 		BEQ	PRAXIT		; We reached the terminating null
 		JSR	PUTSER
-		INC	DPL
+		INC	PTR_L
 		BNE	PRINTLP1
-		INC	DPH		; overflow on low ptr count; inc high ptr
+		INC	PTR_H		; overflow on low ptr count; inc high ptr
 		BRA	PRINTLP1
 PRAXIT		RTS			
 
