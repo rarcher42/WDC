@@ -225,7 +225,14 @@ PUTCH		STA	SDR
 
 ; A kludge until timers work to limit transmit speed to avoid TX overruns
 ; This is kind of terrible.  Replace.
-TX_DLY_CYCLES = $24FF		; Not tuned.  As it's temporary, optimum settings are unimportant.
+TX_DLY_CYCLES = $06F0		; Not tuned.  As it's temporary, optimum settings are unimportant.
+; $24FF - reliable
+; $1280 - reliable
+; $0940 - reliable
+; $04A0 - not reliable
+; $06F0 - reliable.  Good enough for now. We're going to use VIA timer for this soon anyway
+; 
+; 
 TXCHDLY		PHA
 		PHX
 		PHY

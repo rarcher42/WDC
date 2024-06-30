@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L bootloader.lst --intel-hex -o bootloader.hex bootloader.asm
-; Sat Jun 29 20:54:44 2024
+; Sat Jun 29 21:49:43 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -185,12 +185,12 @@
 .f96a	8d 80 7f	sta $7f80	PUTCH		STA	SDR
 .f96d	20 71 f9	jsr $f971		 	JSR	TXCHDLY		; Awful kludge
 .f970	60		rts				RTS
-=$24ff					TX_DLY_CYCLES = $24FF		; Not tuned.  As it's temporary, optimum settings are unimportant.
+=$06f0					TX_DLY_CYCLES = $06F0		; Not tuned.  As it's temporary, optimum settings are unimportant.
 .f971	48		pha		TXCHDLY		PHA
 .f972	da		phx				PHX
 .f973	5a		phy				PHY
-.f974	a2 24		ldx #$24			LDX	#>TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
-.f976	a0 ff		ldy #$ff			LDY	#<TX_DLY_CYCLES
+.f974	a2 06		ldx #$06			LDX	#>TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
+.f976	a0 f0		ldy #$f0			LDY	#<TX_DLY_CYCLES
 .f978	20 7f f9	jsr $f97f			JSR 	DLY_XY
 .f97b	7a		ply				PLY
 .f97c	fa		plx				PLX
