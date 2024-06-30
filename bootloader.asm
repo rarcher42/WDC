@@ -16,27 +16,14 @@ MASK6	=	 %01000000
 MASK7	=	 %10000000
 
 ; Zero page storage map
-TEMP 		=   $F0     ; save hex value
+DP_START =	$20
+DPL	=	DP_START
+DPH	=	DP_START+1
+CNTL	=	DP_START+2
+CNTH	=	DP_START+3
+TEMP 	=   	DP_START+4
 
-
-; 65C51 ACIA equates for serial I/O
-;
-ACIA_BASE = $7F30		; This is where the 6551 ACIA starts
-SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
-SSR = ACIA_BASE+1     		; Serial data status register
-SCMD = ACIA_BASE+2     		; Serial command reg. ()
-SCTL = ACIA_BASE+3     		; Serial control reg. ()
-TX_RDY = MASK4
-RX_RDY = MASK3
-; Quick n'dirty assignments instead of proper definitions of each parameter
-; "ORed" together to build the desired flexible configuration.  We're going
-; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
-;
-SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
-SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
-
-
-; TIDE2VIA	the system VIA
+; TIDE2VIA	the system VIA.  Used by many and defined globally
 ; IO for the VIA which is used for the USB debugger interface.
 SYSTEM_VIA_IORB     = $7FE0 ; Port B IO register
 SYSTEM_VIA_IORA     = $7FE1 ; Port A IO register
@@ -54,46 +41,224 @@ SYSTEM_VIA_PCR      = $7FEC ; Peripheral control register
 SYSTEM_VIA_IFR		= $7FED ; Interrupt flag register
 SYSTEM_VIA_IER      = $7FEE ; Interrupt enable register
 SYSTEM_VIA_ORA_IRA	= $7FEF ; Port A IO register, but no handshake
-; System VIA named bitmasks
+; System VIA Port B named bitmasks
 PB0 = MASK0
 PB1 = MASK1
 PB2 = MASK2
 PB3 = MASK3
+PB4 = MASK4
 PB5 = MASK5
+PB6 = MASK6
+PB7 = MASK7
+ALL_INPUTS = $00
+ALL_OUTPUTS = $FF
+
+
+*= $F800	; Monitor start address
+START   	SEI                     ; disable interrupts
+        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+        	LDX    	#$FF            ; Set up the stack pointer
+        	TXS      
+		JSR	INITSER       	;    
+OUTMSG		LDX	#>ENTRYMSG
+		LDY	#<ENTRYMSG
+		JSR	PRINTXY	
+		JSR	PUTCRLF
+		; Set up a test memory dump - dump a couple pages from flash
+		LDA	#$F8
+		STA	DPH
+		LDA	#$00
+		STA	DPL
+		LDA	#>512
+		STA	CNTH
+		LDA	#<512
+		STA	CNTL
+		JSR	DUMPHEX
+		LDX	#>ECHOTEST
+		LDY	#<ECHOTEST
+		JSR	PRINTXY
+		JSR	PUTCRLF
+		; Now just echo incoming characters
+ECHO		JSR	GETCHA		
+		BCS	ECHO
+		JSR	PUTCH
+		BRA	ECHO
+					
+DUMPHEX		JSR	PUTCRLF
+		LDA	DPH
+		JSR	PUTHEX
+		LDA	DPL
+		JSR	PUTHEX
+		LDA	#':'
+		JSR	PUTCH
+		JSR	PUTSP
+NXTBYTE		LDA	(DPL)		; Get next byte
+		JSR	PUTHEX
+		JSR	PUTSP
+		; Update count
+		DEC	CNTL
+		BNE	CHKEOD
+		DEC	CNTH
+CHKEOD		LDA	CNTL
+		ORA	CNTH
+		BEQ 	DUMPHX1
+		; increment data pointer
+		INC	DPL		; point to the next byte
+		BNE	CHKEOL	
+		INC	DPH
+CHKEOL		LDA	DPL
+		AND	#$0F		; Look at next address to write
+		BNE	NXTBYTE		; inter-line byte, so continue dumping
+		BRA	DUMPHEX		; Start a new line
+DUMPHX1		JSR	PUTCRLF
+		RTS
+
+ENTRYMSG	.text		"SillyMon816 v0.01",13,10
+		.text		"(c) Never",13,10
+		.text		"No rights reserved",13,10,13,10
+		.text		0
+
+ECHOTEST	.text		"Echo loopback test.  65C816 will send all received data",13,10	
+		.text		"back to sender now.",13,10,">"
+		.text 		0
+
+
+;;;; ============================= 65c51 UART functions ======================================
+; 65C51 ACIA equates for serial I/O
+;
+ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
+SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+SSR = ACIA_BASE+1     		; Serial data status register
+SCMD = ACIA_BASE+2     		; Serial command reg. ()
+SCTL = ACIA_BASE+3     		; Serial control reg. ()
+TX_RDY = MASK4
+RX_RDY = MASK3
+; Quick n'dirty assignments instead of proper definitions of each parameter
+; "ORed" together to build the desired flexible configuration.  We're going
+; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+;
+SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
+
+
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+		STA 	SCTL		
+		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+		STA     SCMD
+		RTS
+
+GETCHA		LDA	SSR
+		AND	#RX_RDY
+		SEC			; C=1 because no character is waiting
+		BEQ	GCHAX1
+		LDA	SDR
+		CLC			; Character waiting in A
+GCHAX1		RTS
+
+
+; Raw, busy-waiting serial output
+; FIXME: add timoeut in busy-wait
+PUTCRLF		LDA	#13
+		JSR	PUTSER
+PUTLF		LDA	#10
+PUTSER		
+PUTCHA		STA	SDR
+	 	JSR	TXCHDLY		; Awful kludge
+		RTS	
+
+SERRDY		LDA	SSR
+		AND	#RX_RDY
+		RTS			; 0 = no byte ready
+
+GETSER		JSR	SERRDY		; Since we're busy waiting, JSR overhead is fine :)	
+		BEQ	GETSER
+		LDA	SDR
+		RTS
+
+PUTSP		LDA	#' '
+		JSR	PUTSER
+		RTS
+; Print the string at *(X, Y) (8 bit mode)  Re-write as I learn to use just *(X)
+; 8 bit emulation mode
+PRINTXY		STX	DPH		; Save the address in direct page pointer@DPL
+		STY	DPL
+PRINTLP1	LDA	(DPL)
+		BEQ	PRAXIT		; We reached the terminating null
+		JSR	PUTSER
+		INC	DPL
+		BNE	PRINTLP1
+		INC	DPH		; overflow on low ptr count; inc high ptr
+		BRA	PRINTLP1
+PRAXIT		RTS			
+
+; Print A:X,Y as 24 bit hexadeciaml value
+PUTHEX24	JSR	PUTHEX
+		LDA	#':'
+		JSR 	PUTSER
+; Put byte in A as hexydecascii
+; Print X,Y as 16 bit value
+PUTHEX16	PHY
+		TXA
+		JSR	PUTHEX
+		PLY
+		TYA
+; Print A[7..0]
+PUTHEX  	PHA             	;
+        	LSR 	A
+        	LSR 	A
+		LSR 	A
+		LSR 	A
+        	JSR     PRNIBL
+        	PLA
+PRNIBL  	AND     #$0F    	; strip off the low nibble
+        	CMP     #$0A
+        	BCC  	NOTHEX  	; if it's 0-9, add '0' else also add 7
+        	ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
+NOTHEX  	ADC     #'0'    	; If carry clear, we're 0-9
+; Write the character in A as ASCII:
+PUTCH		STA	SDR
+	 	JSR	TXCHDLY		; Awful kludge
+		RTS
+
+
+; A kludge until timers work to limit transmit speed to avoid TX overruns
+; This is kind of terrible.  Replace.
+TX_DLY_CYCLES = $24FF		; Not tuned.  As it's temporary, optimum settings are unimportant.
+TXCHDLY		PHA
+		PHX
+		PHY
+		LDX	#>TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
+		LDY	#<TX_DLY_CYCLES
+		JSR 	DLY_XY
+		PLY
+		PLX
+		PLA
+		RTS
+
+		; Fall through
+; XY = 16 bit delay count
+DLY_XY		TYA
+		BEQ	DLC1
+INNER1		DEY	
+		BNE	INNER1
+DLC1		TXA
+		BEQ	TDXIT1
+		DEX
+		DEY	; Y<= 0xFF	
+		BRA	DLY_XY
+TDXIT1		RTS		
+;;;; ============================= New FIFO functions ======================================
+; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
+
 FIFO_TXE = PB0
 FIFO_RXF = PB1
 FIFO_WR = PB2
 FIFO_RD = PB3
 FIFO_PWREN = PB5
 
-;
 
-; "Shadow" RAM vectors (note each is $8000 below the actual ROM vector)
-NMIVEC	= 	 	$7EFA	; write actual NMI vector here
-IRQVEC   =      $7EFE   ; write IRQ vector here
-
-
-
-*= $F800							; Monitor start address
-START   	SEI                     ; disable interrupts
-        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-        	LDX    	#$FF            ; Set up the stack pointer
-        	TXS                     ;       "
-        	LDA     #>START      	; Initialiaze the interrupt vectors
-        	STA     NMIVEC+1        ; User program at ENTRY_POINT may change
-        	STA     IRQVEC+1	; these vectors.  Just do change before enabling
-        	LDA     #<START		; the interrupts, or you'll end up back in the d/l monitor.
-        	STA     NMIVEC
-        	STA     IRQVEC
-		JSR	INITFIFO	; Set up 65C22 to FIFO interface chip (and ROM bank select)
-		JSR	INITSER
-ECHO		JSR	GETCHA		; get chaacter from primary interface
-		BCS	ECHO		; Wait for an incoming character
-		JSR	PUTCHA
-		BRA	ECHO
-			
-;;;; ============================= New FIFO functions ======================================
-; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
 ; On exit:
 ;
 ; 1.	CA2 and CB2 are floating; This ensures writes to system VIA port B don't inadvertently change 
@@ -142,7 +307,7 @@ FIFOPWR:
 ; If the FIFO is full, it will return immediately with the carry set (C=1)
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is clear.
-PUTCHA  	STA	TEMP			; save output character
+PUTCHB  	STA	TEMP			; save output character
 		LDA	SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
 		AND	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 		SEC				; FIFO is full, so don't try to queue it!	
@@ -175,7 +340,7 @@ OFX1	  	RTS
 ; On exit:
 ; If Carry flag is clear, A contains the next byte from the FIFO
 ; If carry flag is set, there were no characters waiting
-GETCHA		LDA	SYSTEM_VIA_IORB	; Check RXF flag
+GETCHB		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
 		SEC
 		BNE 	INFXIT			; If RXF is 1, then no character is waiting!
@@ -196,57 +361,14 @@ GETCHA		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 		CLC				; we got a byte!
 INFXIT		RTS
 
-; Serial functions
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
-; the serial port.
-INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-		STA 	SCTL		
-		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-		STA     SCMD
-		RTS
 
-; Call to get the next waiting serial character. 
-; Returns carry flag clear if character was read.  Character will be in A
-; Returns carry set (C=1) if no character is waiting
-; A and flags are destroyed (obviously)
-GETCHB  	LDA     SSR    		; look at serial status
-		AND     #RX_RDY 	; see if anything is ready
-		SEC					; signal no character waiting
-	  	BEQ     GSXIT1		; 0 = no character waiting.  Return with C=0
-		LDA    	SDR     	; get the character
-		CLC			; Signal receipt of character
-GSXIT1		RTS	
- 
-; Uses X as temporary storage, so it's saved
-; A is preserved 
-; Save A because this allows for multiple calls until transmitter is ready (kludge-mode)
-; Upon exit, if Carry flag = 0 (clear) the character was queued for transmission.
-;            if Carry flag = 1 (set) then you'll have to re-try it.
-PUTCHB		PHX
-		PHA
-		TAX					; save output character in X		
-		LDA		SSR	
-		AND 		#TX_RDY	
-		SEC				; assume no room if branch taken	
-		BEQ		PSXIT1		; TXE=0 means transmitter is busy.  Send will fail
-		STX		SDR			; send the character	
-		CLC					; indicate success
-PSXIT1		PLA
-		PLX
-		RTS
-
-
-
-; User "shadow" vectors:
-GOIRQ		JMP	(IRQVEC)
-GONMI		JMP	(NMIVEC)
-GORST		JMP	START		; Allowing user program to change this is a mistake
+		
 
 * = $FFFA
 ;  start at $FFFA
-NMIENT  .word     GONMI
-RSTENT  .word     GORST
-IRQENT  .word     GOIRQ
+NMIENT  .word     START
+RSTENT  .word     START
+IRQENT  .word     START
 .end				; finally.  das Ende.  Fini.  It's over.  Go home!
 
 Last page update: March 22, 2001. 
