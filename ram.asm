@@ -1,10 +1,31 @@
-;
-; Ultra-basic bootloader.  Not yet working.
-; R. Archer 6/2024
+
 ; Assembled with 64TASS
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
 ;
+
+*= $2000	; RAM load address
+START   	SEI                     ; disable interrupts
+        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
+        	LDX    	#$FF            ; Set up the stack pointer
+        	TXS      
+		JSR	INITSER       	; 
+		; The transmit register may not be empty, so delay a bit
+		JSR	TXCHDLY
+		JSR	TXCHDLY		; probably unnecessary   
+OUTMSG		LDX	#>ENTRYMSG
+		LDY	#<ENTRYMSG
+		JSR	PRINTXY	
+		JSR	PUTCRLF
+		LDX	#>EXITMSG
+		LDY	#<EXITMSG
+		JSR	PRINTXY
+		JSR	PUTCRLF
+		JMP	$F800
+
+;
+
+
 ; AND masks for bit positions
 MASK0	=	 %00000001
 MASK1	=	 %00000010
@@ -62,256 +83,6 @@ PB7 = MASK7
 ALL_INPUTS = $00
 ALL_OUTPUTS = $FF
 
-
-*= $F800	; Monitor start address
-START   	SEI                     ; disable interrupts
-        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-        	LDX    	#$FF            ; Set up the stack pointer
-        	TXS      
-		JSR	INITSER       	;    
-OUTMSG		LDX	#>ENTRYMSG
-		LDY	#<ENTRYMSG
-		JSR	PRINTXY	
-		JSR	PUTCRLF
-		; Monitor prompt starts here
-MONITOR		LDX	#>MENU
-		LDY	#<MENU
-		JSR	PRINTXY
-		JSR	PUTCRLF
-		LDA	#'>'
-		JSR	PUTCH
-GETOPT:		JSR	GETCH
-		PHA
-		JSR	PUTCH
-		PLA
-		CMP	#'L'
-		BNE	NOLOAD
-		JMP	S_LOAD
-NOLOAD		CMP	#'G'
-		BEQ	JUMPDRIVE
-		; End of case. Default = error
-		JSR	PUTCRLF
-		LDA	#'?'
-		JSR	PUTCH
-		BRA	MONITOR
-
-JUMPDRIVE:	JSR	GETCH
-		STA	SDR
-		CMP	#' '
-		BEQ	JUMPDRIVE	; Eat leading spaces
-JDMAKHEX	JSR     MKNIBL  	; Convert to 0..F numeric
-        	ASL     A
-        	ASL     A
-        	ASL     A
-        	ASL     A       	; This is the upper nibble
-        	AND     #$F0
-        	STA     TEMP
-		STZ	SA_B		; No bank for now
-        	JSR     GETCH
-		STA	SDR
-        	JSR     MKNIBL
-        	ORA    	TEMP
-        	STA	SA_H
-		JSR	GETHEX
-		PHA
-		JSR	PUTHEX
-
-		PLA
-		STA	SA_L
-WAITEOL		JSR	GETCH
-		STA	SDR
-		CMP	#13
-		BNE	WAITEOL
-		LDA	SA_B
-		JSR	PUTHEX
-		LDA	#':'
-		JSR	PUTCH
-		LDA	SA_H
-		JSR	PUTHEX
-		LDA	SA_L
-		JSR	PUTHEX
-		LDA	#'^'
-		STA	SDR
-		JMP	(SA_L)		; Do the massive Leap of faith	
-		
-;-----------------------------------------------------------------------------------
-; S-record loader 
-;S0 06 0000 484452 1B (HDR)
-;S1 23 F800 78D8A2FF9A2033F9A2F8A0AE206EF9204BF9A9F88522A9008521A9028525A900 A5
-;S5 03 0013 E9
-;S9 03 F800 04
-; (spaces added for readability; not part of the format)
-;
-S_LOAD		
-SYNC:		; WAIT FOR 'S'
-		JSR	GETCH
-		CMP	#'S'
-		BNE	SYNC
-		; Optimistically assume start of record.
-		; Try to decode the record type and dispatch
-		JSR	GETCH
-		STA	SDR		; Echo record type back to show sync initially
-		CMP	#'1'
-		BEQ	GET16
-		CMP	#'2'
-		BEQ	GET24
-		CMP	#'5'
-		BEQ	CNT16
-		CMP	#'6'
-		BEQ	CNT24
-		CMP	#'8'
-		BNE	SLC1
-		JMP	SA24		; Too far for relative branch
-SLC1		CMP	#'9'
-		BEQ	SA16
-		; We'll ignore everything else, including the HDR record
-		JMP	SYNC
-GET24		LDA	#4
-		STA	EXTRA
-		BRA	GET1624
-GET16		LDA	#3
-		STA	EXTRA		
-GET1624		STZ	PTR_B		; Set bank to 0 unless test for 24 bit later
-		JSR	GETHEX		; Get byte count
-		SEC
-		SBC	EXTRA		; Subtract 3 for S1, 4 for S2 to get data size
-		STA	DATA_CNT	; Expected number of data bytes to write to RAM
-		LDA	EXTRA
-		CMP	#3
-		BEQ	GET16C1	
-		JSR	GETHEX
-		STA	PTR_B		; Store the bank for 24 bit records
-GET16C1		JSR	GETHEX
-		STA	PTR_H
-		JSR	GETHEX
-		STA	PTR_L
-		LDA	DATA_CNT	; It's possible to have a record with no data bytes
-		BEQ 	G16X1		; All payload data bytes written to RAM
-SAVDAT:		JSR	GETHEX
-		STA	(PTR_L)		; Stoare value @ PTR
-		JSR	INC_PTR
-		DEC	DATA_CNT	; 
-		BNE	SAVDAT		; Process more bytes
-G16X1		JSR 	GETHEX		; get CKSUM	(implement later)
-		LDA	#'#'
-		STA	SDR		; Give feedback.  Another record in
-		BRA	SYNC
-
-CNT16		JSR	GETHEX		; length byte
-		STZ	CTR_B
-		JSR	GETHEX		; bits 15-8
-		STA	CTR_H
-		JSR	GETHEX		; bits 7-0
-		STA	CTR_L
-		BRA	SYNC
-
-CNT24		JSR	GETHEX		; length byte
-		JSR	GETHEX
-		STA	CTR_B
-		JSR	GETHEX		; bits 15-8
-		STA	CTR_H
-		JSR	GETHEX		; bits 7-0
-		STA	CTR_L
-		JMP	SYNC
-
-SA16		JSR	GETHEX		; length byte
-		STZ	SA_B
-		JSR	GETHEX		; bits 15-8
-		STA	SA_H
-		JSR	GETHEX		; bits 7-0
-		STA	SA_L
-		LDA	#'*'
-		STA	SDR		; end of records 16
-		JMP	MONITOR
-
-SA24		JSR	GETHEX		; length byte
-		JSR	GETHEX
-		STA	SA_B
-		JSR	GETHEX		; bits 15-8
-		STA	SA_H
-		JSR	GETHEX		; bits 7-0
-		STA	SA_L
-		LDA	#'&'
-		STA	SDR		; end of records 24
-		JMP	MONITOR
-
-
-;
-; Basic 24 bit operations FIXME: (currently only 16)
-PR_ADDR		LDA	PTR_H
-		JSR	PUTHEX
-		LDA	PTR_L
-		JSR	PUTHEX
-		LDA	#':'
-		JMP	PUTCH
-
-INC_PTR		INC	PTR_L		; point to the next byte
-		BNE	IPXIT1	
-		INC	PTR_H	
-IPXIT1		RTS
-
-; Decrement counter until it's zero.  Z is set if final count (0) has been reached
-DEC_CTR		LDA	CTR_L
-		BNE	DCC_C1		; No borrow if > 0 
-		; Borrow pending if not already at $0000
-		LDA	CTR_H
-		BEQ	DCXIT2		; already zero; don't decrement
-		; Need to borrow one from high byte
-		DEC	CTR_H		; Borrow because CTR_L will be 0xFF after dec below
-DCC_C1		DEC	CTR_L
-DCXIT1		LDA	CTR_H		; set zero flag on exit
-		ORA	CTR_L
-DCXIT2		RTS
-
-RD_BYTE		LDA	(PTR_L)
-		RTS			; FIXME: write as a macro
-
-WR_BYTE		STA	(PTR_L)		; FIXME: write as a macro
-		RTS	
-
-
-
-; Basic conversions	
-GETHEX  	JSR     GETCH
-        	JSR     MKNIBL  	; Convert to 0..F numeric
-        	ASL     A
-        	ASL     A
-        	ASL     A
-        	ASL     A       	; This is the upper nibble
-        	AND     #$F0
-        	STA     TEMP
-        	JSR     GETCH
-        	JSR     MKNIBL
-        	ORA    	TEMP
-        	RTS 
-           	; 
-; Convert the ASCII nibble to numeric value from 0-F:
-MKNIBL  	CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
-        	BCC     MKNNH   	; If we borrowed, we lost the carry so 0..9
-        	SBC     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
-        	; If we fall through, carry is set unlike direct entry at MKNNH
-MKNNH   	SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
-        	AND     #$0F    	; no upper nibble no matter what
-        	RTS             	; and return the nibble
-
-			
-DUMPHEX		JSR	PUTCRLF
-		JSR	PR_ADDR
-		JSR	PUTSP
-NXTBYTE		JSR	RD_BYTE		; Get byte at (PTR) 
-		JSR	PUTHEX
-		JSR	PUTSP
-		; Update count
-		JSR	DEC_CTR
-		BEQ 	DUMPHX1
-		; increment data pointer
-		JSR	INC_PTR		; Point to the next byte
-CHKEOL		LDA	PTR_L
-		AND	#$0F		; Look at next address to write
-		BNE	NXTBYTE		; inter-line byte, so continue dumping
-		BRA	DUMPHEX		; Start a new line
-DUMPHX1		JSR	PUTCRLF
-		RTS
 
 
 ;;;; ============================= 65c51 UART functions ======================================
@@ -561,18 +332,14 @@ GETCHB		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 INFXIT		RTS
 
 
-ENTRYMSG	.text		"SillyMon816 v0.01",13,10
-		.text		"(c) Never",13,10
-		.text		"No rights reserved",13,10,13,10
+ENTRYMSG	.text		13,10,13,10
+		.text		"  Testing RAM program, running from RAM  ",13,10
+		.text		"       Seems like it's working!",13,10
+		.text		"            STOP TESTING!!!",13,10
+		.text		"         (before you find a bug!)",13,10,13,10
 		.text		0
 
-DOWNLOAD	.text		"Send Motorola S19 or S28 record file",13,10	
-		.text		13,10,">"
-		.text 		0
-
-MENU		.text		13,10,"Options - use uppercase only",13,10
-		.text		"L      -    Load Motorola S19 or S28 S-records",13,10
-		.text		"G xxxx -    Jump to address $xxxx",13,10
+EXITMSG		.text		13,10,"Done... returning to ROM monitor!",13,10
 		.text		0
 * = $FFFA
 ;  start at $FFFA
