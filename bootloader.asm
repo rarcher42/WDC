@@ -18,12 +18,18 @@ MASK7	=	 %10000000
 ; Zero page storage map
 * = $20
 DP_START	.byte	?
-PTR_L		.byte	?
+PTR_L		.byte	?	; Generic pointer
 PTR_H		.byte	?
 PTR_B		.byte	?
-CTR_L		.byte	?
+CTR_L		.byte	?	; Counter
 CTR_H		.byte	?
-TEMP 	  	.byte	?
+CTR_B		.byte	?
+SA_L		.byte 	?	; Starting address storage
+SA_H		.byte 	?
+SA_B		.byte	?
+DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
+EXTRA		.byte	? 	; Used inside loader.  Otherwise, free for use
+TEMP 	  	.byte	?	; May be used within any subroutine 
 
 ; TIDE2VIA	the system VIA.  Used by many and defined globally
 ; IO for the VIA which is used for the USB debugger interface.
@@ -77,8 +83,8 @@ OUTMSG		LDX	#>ENTRYMSG
 		LDA	#<512
 		STA	CTR_L
 		JSR	DUMPHEX
-		LDX	#>ECHOTEST
-		LDY	#<ECHOTEST
+		LDX	#>DOWNLOAD
+		LDY	#<DOWNLOAD
 		JSR	PRINTXY
 		JSR	PUTCRLF
 		; Now just echo incoming characters
@@ -86,7 +92,108 @@ ECHO		JSR	GETCHA
 		BCS	ECHO
 		JSR	PUTCH
 		BRA	ECHO
+;-----------------------------------------------------------------------------------
+; S-record loader 
+;S0 06 0000 484452 1B (HDR)
+;S1 23 F800 78D8A2FF9A2033F9A2F8A0AE206EF9204BF9A9F88522A9008521A9028525A900 A5
+;S5 03 0013 E9
+;S9 03 F800 04
+; (spaces added for readability; not part of the format)
 ;
+S_LOAD		
+SYNC:		; WAIT FOR 'S'
+		JSR	GETCH
+		CMP	#'S'
+		BNE	SYNC
+		; Optimistically assume start of record.
+		; Try to decode the record type and dispatch
+		JSR	GETCH
+		STA	SDR		; Echo record type back to show sync initially
+		CMP	#'1'
+		BEQ	GET16
+		CMP	#'2'
+		BEQ	GET24
+		CMP	#'5'
+		BEQ	CNT16
+		CMP	#'6'
+		BEQ	CNT24
+		CMP	#'8'
+		BNE	SLC1
+		JMP	SA24		; Too far for relative branch
+SLC1		CMP	#'9'
+		BEQ	SA16
+		; We'll ignore everything else, including the HDR record
+		JMP	SYNC
+GET24		LDA	#4
+		STA	EXTRA
+		BRA	GET1624
+GET16		LDA	#3
+		STA	EXTRA		
+GET1624		STZ	PTR_B		; Set bank to 0 unless test for 24 bit later
+		JSR	GETHEX		; Get byte count
+		SEC
+		SBC	EXTRA		; Subtract 3 for S1, 4 for S2 to get data size
+		STA	DATA_CNT	; Expected number of data bytes to write to RAM
+		LDA	EXTRA
+		CMP	#3
+		BEQ	GET16C1	
+		JSR	GETHEX
+		STA	PTR_B		; Store the bank for 24 bit records
+GET16C1		JSR	GETHEX
+		STA	PTR_H
+		JSR	GETHEX
+		STA	PTR_L
+		LDA	DATA_CNT	; It's possible to have a record with no data bytes
+		BEQ 	G16X1		; All payload data bytes written to RAM
+SAVDAT:		JSR	GETHEX
+		STA	(PTR_L)		; Stoare value @ PTR
+		JSR	INC_PTR
+		DEC	DATA_CNT	; 
+		BNE	SAVDAT		; Process more bytes
+G16X1		JSR 	GETHEX		; get CKSUM	(implement later)
+		LDA	#'#'
+		STA	SDR		; Give feedback.  Another record in
+		BRA	SYNC
+
+CNT16		JSR	GETHEX		; length byte
+		STZ	CTR_B
+		JSR	GETHEX		; bits 15-8
+		STA	CTR_H
+		JSR	GETHEX		; bits 7-0
+		STA	CTR_L
+		BRA	SYNC
+
+CNT24		JSR	GETHEX		; length byte
+		JSR	GETHEX
+		STA	CTR_B
+		JSR	GETHEX		; bits 15-8
+		STA	CTR_H
+		JSR	GETHEX		; bits 7-0
+		STA	CTR_L
+		JMP	SYNC
+
+SA16		JSR	GETHEX		; length byte
+		STZ	SA_B
+		JSR	GETHEX		; bits 15-8
+		STA	SA_H
+		JSR	GETHEX		; bits 7-0
+		STA	SA_L
+		LDA	#'*'
+		STA	SDR		; end of records 16
+		JMP	SYNC
+
+SA24		JSR	GETHEX		; length byte
+		JSR	GETHEX
+		STA	SA_B
+		JSR	GETHEX		; bits 15-8
+		STA	SA_H
+		JSR	GETHEX		; bits 7-0
+		STA	SA_L
+		LDA	#'&'
+		STA	SDR		; end of records 24
+		JMP	SYNC
+
+
 ;
 ; Basic 24 bit operations FIXME: (currently only 16)
 PR_ADDR		LDA	PTR_H
@@ -123,7 +230,7 @@ WR_BYTE		STA	(PTR_L)		; FIXME: write as a macro
 
 
 ; Basic conversions	
-GETHEX  	JSR     GETSER
+GETHEX  	JSR     GETCH
         	JSR     MKNIBL  	; Convert to 0..F numeric
         	ASL     A
         	ASL     A
@@ -131,7 +238,7 @@ GETHEX  	JSR     GETSER
         	ASL     A       	; This is the upper nibble
         	AND     #$F0
         	STA     TEMP
-        	JSR     GETSER
+        	JSR     GETCH
         	JSR     MKNIBL
         	ORA    	TEMP
         	RTS 
@@ -156,22 +263,13 @@ NXTBYTE		JSR	RD_BYTE		; Get byte at (PTR)
 		JSR	DEC_CTR
 		BEQ 	DUMPHX1
 		; increment data pointer
-		JSR	INC_PTR
+		JSR	INC_PTR		; Point to the next byte
 CHKEOL		LDA	PTR_L
 		AND	#$0F		; Look at next address to write
 		BNE	NXTBYTE		; inter-line byte, so continue dumping
 		BRA	DUMPHEX		; Start a new line
 DUMPHX1		JSR	PUTCRLF
 		RTS
-
-ENTRYMSG	.text		"SillyMon816 v0.01",13,10
-		.text		"(c) Never",13,10
-		.text		"No rights reserved",13,10,13,10
-		.text		0
-
-ECHOTEST	.text		"Echo loopback test.  65C816 will send all received data",13,10	
-		.text		"back to sender now.",13,10,">"
-		.text 		0
 
 
 ;;;; ============================= 65c51 UART functions ======================================
@@ -224,8 +322,8 @@ SERRDY		LDA	SSR
 		RTS			; 0 = no byte ready
 
 ; Be careful.  This will busy wait forever and isn't sound for producction use
-GETSER		JSR	SERRDY		; Since we're busy waiting, JSR overhead is fine :)	
-		BEQ	GETSER
+GETCH		JSR	SERRDY		; Since we're busy waiting, JSR overhead is fine :)	
+		BEQ	GETCH
 		LDA	SDR
 		RTS
 
@@ -421,6 +519,14 @@ GETCHB		LDA	SYSTEM_VIA_IORB	; Check RXF flag
 INFXIT		RTS
 
 
+ENTRYMSG	.text		"SillyMon816 v0.01",13,10
+		.text		"(c) Never",13,10
+		.text		"No rights reserved",13,10,13,10
+		.text		0
+
+DOWNLOAD	.text		"Send Motorola S19 or S28 record file",13,10	
+		.text		13,10,">"
+		.text 		0
 		
 
 * = $FFFA
