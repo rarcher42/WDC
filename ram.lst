@@ -1,253 +1,70 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L ram.lst --s-record -o ram.hex ram.asm
-; Sun Jun 30 20:22:54 2024
+; Mon Jul 01 18:10:29 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
 ;******  Processing input file: ram.asm
 
-.2000	78		sei		START   	SEI                     ; disable interrupts
-.2001	d8		cld		        	CLD                     ; binary mode arithmetic (not required on 65C02 or 65816)
-.2002	a2 ff		ldx #$ff	        	LDX    	#$FF            ; Set up the stack pointer
-.2004	9a		txs		        	TXS
-.2005	20 2d 00	jsr $002d			JSR	INITSER       	;
-.2008	20 a5 00	jsr $00a5			JSR	TXCHDLY
-.200b	20 a5 00	jsr $00a5			JSR	TXCHDLY		; probably unnecessary
-.200e	a2 01		ldx #$01	OUTMSG		LDX	#>ENTRYMSG
-.2010	a0 32		ldy #$32			LDY	#<ENTRYMSG
-.2012	20 68 00	jsr $0068			JSR	PRINTXY
-.2015	20 45 00	jsr $0045			JSR	PUTCRLF
-.2018	a2 01		ldx #$01			LDX	#>EXITMSG
-.201a	a0 c5		ldy #$c5			LDY	#<EXITMSG
-.201c	20 68 00	jsr $0068			JSR	PRINTXY
-.201f	20 45 00	jsr $0045			JSR	PUTCRLF
-.2022	4c 00 f8	jmp $f800			JMP	$F800
-=$01					MASK0	=	 %00000001
-=$02					MASK1	=	 %00000010
-=$04					MASK2	=	 %00000100
-=$08					MASK3	=	 %00001000
-=$10					MASK4	=	 %00010000
-=$20					MASK5	=	 %00100000
-=$40					MASK6	=	 %01000000
-=$80					MASK7	=	 %10000000
->0020					DP_START	.byte	?
->0021					PTR_L		.byte	?	; Generic pointer
->0022					PTR_H		.byte	?
->0023					PTR_B		.byte	?
->0024					CTR_L		.byte	?	; Counter
->0025					CTR_H		.byte	?
->0026					CTR_B		.byte	?
->0027					SA_L		.byte 	?	; Starting address storage
->0028					SA_H		.byte 	?
->0029					SA_B		.byte	?
->002a					DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
->002b					EXTRA		.byte	? 	; Used inside loader.  Otherwise, free for use
->002c					TEMP 	  	.byte	?	; May be used within any subroutine
-=$7fe0					SYS_VIA_BASE	    = $7FE0
-=32736					SYSTEM_VIA_IORB     =  	SYS_VIA_BASE+0	; Port B IO register
-=32737					SYSTEM_VIA_IORA     =	SYS_VIA_BASE+1 	; Port A IO register
-=32738					SYSTEM_VIA_DDRB     = 	SYS_VIA_BASE+2	; Port B data direction register
-=32739					SYSTEM_VIA_DDRA     = 	SYS_VIA_BASE+3	; Port A data direction register
-=32740					SYSTEM_VIA_T1C_L    =	SYS_VIA_BASE+4 	; Timer 1 counter/latches, low-order
-=32741					SYSTEM_VIA_T1C_H    = 	SYS_VIA_BASE+5	; Timer 1 high-order counter
-=32742					SYSTEM_VIA_T1L_L    = 	SYS_VIA_BASE+6	; Timer 1 low-order latches
-=32743					SYSTEM_VIA_T1L_H    = 	SYS_VIA_BASE+7	; Timer 1 high-order latches
-=32744					SYSTEM_VIA_T2C_L    = 	SYS_VIA_BASE+8	; Timer 2 counter/latches, lower-order
-=32745					SYSTEM_VIA_T2C_H    = 	SYS_VIA_BASE+9	; Timer 2 high-order counter
-=32746					SYSTEM_VIA_SR       = 	SYS_VIA_BASE+10	; Shift register
-=32747					SYSTEM_VIA_ACR      = 	SYS_VIA_BASE+11	; Auxilliary control register
-=32748					SYSTEM_VIA_PCR      =	SYS_VIA_BASE+12	; Peripheral control register
-=32749					SYSTEM_VIA_IFR	    =	SYS_VIA_BASE+13 ; Interrupt flag register
-=32750					SYSTEM_VIA_IER      = 	SYS_VIA_BASE+14	; Interrupt enable register
-=32751					SYSTEM_VIA_ORA_IRA  =	SYS_VIA_BASE+15	; Port A IO register, but no handshake
-=$01					PB0 = MASK0
-=$02					PB1 = MASK1
-=$04					PB2 = MASK2
-=$08					PB3 = MASK3
-=$10					PB4 = MASK4
-=$20					PB5 = MASK5
-=$40					PB6 = MASK6
-=$80					PB7 = MASK7
-=$00					ALL_INPUTS = $00
-=$ff					ALL_OUTPUTS = $FF
-=$7f80					ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
-=$7f80					SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
-=32641					SSR = ACIA_BASE+1     		; Serial data status register
-=32642					SCMD = ACIA_BASE+2     		; Serial command reg. ()
-=32643					SCTL = ACIA_BASE+3     		; Serial control reg. ()
-=$10					TX_RDY = MASK4
-=$08					RX_RDY = MASK3
-=$1e					SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
-=$0b					SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
-.002d	a9 1e		lda #$1e	INITSER 	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-.002f	8d 83 7f	sta $7f83			STA 	SCTL
-.0032	a9 0b		lda #$0b			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-.0034	8d 82 7f	sta $7f82			STA     SCMD
-.0037	60		rts				RTS
-.0038	ad 81 7f	lda $7f81	GETCHA		LDA	SSR
-.003b	29 08		and #$08			AND	#RX_RDY
-.003d	38		sec				SEC			; C=1 because no character is waiting
-.003e	f0 04		beq $0044			BEQ	GCHAX1
-.0040	ad 80 7f	lda $7f80			LDA	SDR
-.0043	18		clc				CLC			; Character waiting in A
-.0044	60		rts		GCHAX1		RTS
-.0045	a9 0d		lda #$0d	PUTCRLF		LDA	#13
-.0047	20 4c 00	jsr $004c			JSR	PUTSER
-.004a	a9 0a		lda #$0a	PUTLF		LDA	#10
-.004c					PUTSER
-.004c	8d 80 7f	sta $7f80	PUTCHA		STA	SDR
-.004f	20 a5 00	jsr $00a5		 	JSR	TXCHDLY		; Awful kludge
-.0052	60		rts				RTS
-.0053	ad 81 7f	lda $7f81	SERRDY		LDA	SSR
-.0056	29 08		and #$08			AND	#RX_RDY
-.0058	60		rts				RTS			; 0 = no byte ready
-.0059	20 53 00	jsr $0053	GETCH		JSR	SERRDY		; Since we're busy waiting, JSR overhead is fine :)
-.005c	f0 fb		beq $0059			BEQ	GETCH
-.005e	ad 80 7f	lda $7f80			LDA	SDR
-.0061	60		rts				RTS
-.0062	a9 20		lda #$20	PUTSP		LDA	#' '
-.0064	20 4c 00	jsr $004c			JSR	PUTSER
-.0067	60		rts				RTS
-.0068	86 22		stx $22		PRINTXY		STX	PTR_H		; Save the address in direct page pointer@PTR
-.006a	84 21		sty $21				STY	PTR_L
-.006c	b2 21		lda ($21)	PRINTLP1	LDA	(PTR_L)
-.006e	f0 0b		beq $007b			BEQ	PRAXIT		; We reached the terminating null
-.0070	20 4c 00	jsr $004c			JSR	PUTSER
-.0073	e6 21		inc $21				INC	PTR_L
-.0075	d0 f5		bne $006c			BNE	PRINTLP1
-.0077	e6 22		inc $22				INC	PTR_H		; overflow on low ptr count; inc high ptr
-.0079	80 f1		bra $006c			BRA	PRINTLP1
-.007b	60		rts		PRAXIT		RTS
-.007c	20 8b 00	jsr $008b	PUTHEX24	JSR	PUTHEX
-.007f	a9 3a		lda #$3a			LDA	#':'
-.0081	20 4c 00	jsr $004c			JSR 	PUTSER
-.0084	5a		phy		PUTHEX16	PHY
-.0085	8a		txa				TXA
-.0086	20 8b 00	jsr $008b			JSR	PUTHEX
-.0089	7a		ply				PLY
-.008a	98		tya				TYA
-.008b	48		pha		PUTHEX  	PHA             	;
-.008c	4a		lsr a		        	LSR 	A
-.008d	4a		lsr a		        	LSR 	A
-.008e	4a		lsr a				LSR 	A
-.008f	4a		lsr a				LSR 	A
-.0090	20 94 00	jsr $0094	        	JSR     PRNIBL
-.0093	68		pla		        	PLA
-.0094	29 0f		and #$0f	PRNIBL  	AND     #$0F    	; strip off the low nibble
-.0096	c9 0a		cmp #$0a	        	CMP     #$0A
-.0098	90 02		bcc $009c	        	BCC  	NOTHEX  	; if it's 0-9, add '0' else also add 7
-.009a	69 06		adc #$06	        	ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
-.009c	69 30		adc #$30	NOTHEX  	ADC     #'0'    	; If carry clear, we're 0-9
-.009e	8d 80 7f	sta $7f80	PUTCH		STA	SDR
-.00a1	20 a5 00	jsr $00a5		 	JSR	TXCHDLY		; Awful kludge
-.00a4	60		rts				RTS
-=$06f0					TX_DLY_CYCLES = $06F0		; Not tuned.  As it's temporary, optimum settings are unimportant.
-.00a5	48		pha		TXCHDLY		PHA
-.00a6	da		phx				PHX
-.00a7	5a		phy				PHY
-.00a8	a2 06		ldx #$06			LDX	#>TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
-.00aa	a0 f0		ldy #$f0			LDY	#<TX_DLY_CYCLES
-.00ac	20 b3 00	jsr $00b3			JSR 	DLY_XY
-.00af	7a		ply				PLY
-.00b0	fa		plx				PLX
-.00b1	68		pla				PLA
-.00b2	60		rts				RTS
-.00b3	98		tya		DLY_XY		TYA
-.00b4	f0 03		beq $00b9			BEQ	DLC1
-.00b6	88		dey		INNER1		DEY
-.00b7	d0 fd		bne $00b6			BNE	INNER1
-.00b9	8a		txa		DLC1		TXA
-.00ba	f0 04		beq $00c0			BEQ	TDXIT1
-.00bc	ca		dex				DEX
-.00bd	88		dey				DEY	; Y<= 0xFF
-.00be	80 f3		bra $00b3			BRA	DLY_XY
-.00c0	60		rts		TDXIT1		RTS
-=$01					FIFO_TXE = PB0
-=$02					FIFO_RXF = PB1
-=$04					FIFO_WR = PB2
-=$08					FIFO_RD = PB3
-=$20					FIFO_PWREN = PB5
-.00c1	9c ec 7f	stz $7fec	INITFIFO   	STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
-.00c4	9c eb 7f	stz $7feb			STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
-.00c7	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
-.00ca	9c e2 7f	stz $7fe2			STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
-.00cd	a9 08		lda #$08			LDA	#FIFO_RD				;
-.00cf	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-.00d2	a9 0c		lda #$0c			LDA	#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
-.00d4	8d e2 7f	sta $7fe2			STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
-.00d7	ea		nop				NOP								; FIXME: Defensive and possibly unnecessary
-.00d8					FIFOPWR:
-.00d8	ad e0 7f	lda $7fe0			LDA	SYSTEM_VIA_IORB
-.00db	29 20		and #$20			AND	#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
-.00dd	d0 f9		bne $00d8			BNE	FIFOPWR
-.00df	60		rts				RTS
-.00e0	85 2c		sta $2c		PUTCHB  	STA	TEMP			; save output character
-.00e2	ad e0 7f	lda $7fe0			LDA	SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
-.00e5	29 01		and #$01			AND	#FIFO_TXE		; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-.00e7	38		sec				SEC				; FIFO is full, so don't try to queue it!
-.00e8	d0 23		bne $010d			BNE	OFX1			; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-.00ea	9c e3 7f	stz $7fe3	OFCONT		STZ	SYSTEM_VIA_DDRA		; (Defensive) Start with Port A input/floating
-.00ed	a9 0c		lda #$0c			LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
-.00ef	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Make sure write is high (and read too!)
-.00f2	a5 2c		lda $2c				LDA	TEMP
-.00f4	8d e1 7f	sta $7fe1			STA	SYSTEM_VIA_IORA		; Set up output value in advance in Port A (still input so doesn't go out yet)
-.00f7	a9 ff		lda #$ff			LDA	#$FF			; make Port A all outputs with stable output value already set in prior lines
-.00f9	8d e3 7f	sta $7fe3			STA	SYSTEM_VIA_DDRA		; Save data to output latches
-.00fc	ea		nop				NOP				; Some settling time of data output just to be safe
-.00fd	ea		nop				NOP
-.00fe	ea		nop				NOP
-.00ff	ea		nop				NOP
-.0100	a9 08		lda #$08			LDA	#(FIFO_RD)		; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
-.0102	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
-.0105	ea		nop				NOP				; Hold time following write strobe, to ensure value is latched OK
-.0106	ea		nop				NOP
-.0107	ea		nop				NOP
-.0108	ea		nop				NOP
-.0109	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-.010c	18		clc				CLC				; signal success of write to caller
-.010d	60		rts		OFX1	  	RTS
-.010e	ad e0 7f	lda $7fe0	GETCHB		LDA	SYSTEM_VIA_IORB	; Check RXF flag
-.0111	29 02		and #$02			AND	#FIFO_RXF		; If clear, we're OK to read.  If set, there's no data waiting
-.0113	38		sec				SEC
-.0114	d0 1b		bne $0131			BNE 	INFXIT			; If RXF is 1, then no character is waiting!
-.0116	9c e3 7f	stz $7fe3			STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
-.0119	a9 08		lda #$08			LDA	#FIFO_RD
-.011b	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
-.011e	ea		nop				NOP
-.011f	9c e0 7f	stz $7fe0			STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A
-.0122	ea		nop				NOP
-.0123	ea		nop				NOP
-.0124	ea		nop				NOP
-.0125	ea		nop				NOP
-.0126	ad e1 7f	lda $7fe1			LDA	SYSTEM_VIA_IORA		; read data in
-.0129	48		pha				PHA
-.012a	a9 08		lda #$08			LDA	#FIFO_RD		; Restore back to inactive signals RD=1 and WR=0
-.012c	8d e0 7f	sta $7fe0			STA	SYSTEM_VIA_IORB
-.012f	68		pla				PLA
-.0130	18		clc				CLC				; we got a byte!
-.0131	60		rts		INFXIT		RTS
->0132	0d 0a 0d 0a			ENTRYMSG	.text		13,10,13,10
->0136	20 20 54 65 73 74 69 6e				.text		"  Testing RAM program, running from RAM  ",13,10
->013e	67 20 52 41 4d 20 70 72 6f 67 72 61 6d 2c 20 72
->014e	75 6e 6e 69 6e 67 20 66 72 6f 6d 20 52 41 4d 20
->015e	20 0d 0a
->0161	20 20 20 20 20 20 20 53				.text		"       Seems like it's working!",13,10
->0169	65 65 6d 73 20 6c 69 6b 65 20 69 74 27 73 20 77
->0179	6f 72 6b 69 6e 67 21 0d 0a
->0182	20 20 20 20 20 20 20 20				.text		"            STOP TESTING!!!",13,10
->018a	20 20 20 20 53 54 4f 50 20 54 45 53 54 49 4e 47
->019a	21 21 21 0d 0a
->019f	20 20 20 20 20 20 20 20				.text		"         (before you find a bug!)",13,10,13,10
->01a7	20 28 62 65 66 6f 72 65 20 79 6f 75 20 66 69 6e
->01b7	64 20 61 20 62 75 67 21 29 0d 0a 0d 0a
->01c4	00						.text		0
->01c5	0d 0a 44 6f 6e 65 2e 2e		EXITMSG		.text		13,10,"Done... returning to ROM monitor!",13,10
->01cd	2e 20 72 65 74 75 72 6e 69 6e 67 20 74 6f 20 52
->01dd	4f 4d 20 6d 6f 6e 69 74 6f 72 21 0d 0a
->01ea	00						.text		0
->fffa	00 20				NMIENT  .word     START
->fffc	00 20				RSTENT  .word     START
->fffe	00 20				IRQENT  .word     START
+=$e036					GET_CHR 	= $E036
+=$e03c					GET_CHR_ECHO 	= $E03C
+=$e04b					PUT_CHR		= $E04B
+=$e04e					PUT_STR		= $E04E
+=$e0b0					MONITOR_ENTRY	= $E0B0
+=10					LF		= 10
+=13					CR		= 13
+.2000	a9 00		lda #$00	START   	LDA	#$00		; Page# = 0
+.2002	a2 1a 20	ldx #$201a			LDX	#QBFMSG
+.2005	22 4e e0 00	jsl $00e04e			JSL	PUT_STR		; Print the string at A:X
+.2009	a9 00		lda #$00			LDA	#0
+.200b	a2 b1 21	ldx #$21b1			LDX	#ANYKEY
+.200e	22 4e e0 00	jsl $00e04e			JSL	PUT_STR
+.2012	22 3c e0 00	jsl $00e03c			JSL	GET_CHR_ECHO	; Read in the ANY key
+.2016	5c b0 e0 00	jml $00e0b0			JML	MONITOR_ENTRY
+>201a	0d 0d				QBFMSG	.text 	CR,CR
+>201c	20 20 20 20 20 20 20 20			.text 	"          ******************************",CR
+>2024	20 20 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2034	2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2044	0d
+>2045	20 20 20 20 20 20 20 20			.text 	"          *                            *",CR
+>204d	20 20 2a 20 20 20 20 20 20 20 20 20 20 20 20 20
+>205d	20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 2a
+>206d	0d
+>206e	20 20 20 20 20 20 20 20			.text 	"          *    The Quick brown Dog     *",CR
+>2076	20 20 2a 20 20 20 20 54 68 65 20 51 75 69 63 6b
+>2086	20 62 72 6f 77 6e 20 44 6f 67 20 20 20 20 20 2a
+>2096	0d
+>2097	20 20 20 20 20 20 20 20			.text 	"          *  Jumps over the Lazy Fox!  *",CR
+>209f	20 20 2a 20 20 4a 75 6d 70 73 20 6f 76 65 72 20
+>20af	74 68 65 20 4c 61 7a 79 20 46 6f 78 21 20 20 2a
+>20bf	0d
+>20c0	20 20 20 20 20 20 20 20			.text 	"          *                            *",CR
+>20c8	20 20 2a 20 20 20 20 20 20 20 20 20 20 20 20 20
+>20d8	20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 2a
+>20e8	0d
+>20e9	20 20 20 20 20 20 20 20			.text 	"          ******************************",CR
+>20f1	20 20 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2101	2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2111	0d
+>2112	20 20 20 20 20 20 20 20		 	.text	"        _,-=._              /|_/|",CR
+>211a	5f 2c 2d 3d 2e 5f 20 20 20 20 20 20 20 20 20 20
+>212a	20 20 20 20 2f 7c 5f 2f 7c 0d
+>2134	20 20 20 20 20 20 20 2a		 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR
+>213c	2d 2e 7d 20 20 20 60 3d 2e 5f 2c 2e 2d 3d 2d 2e
+>214c	5f 2e 2c 20 20 40 20 40 2e 5f 2c 0d
+>2158	20 20 20 20 20 20 20 20		 	.text   "          `._ _,-.   )      _,.-'",CR
+>2160	20 20 60 2e 5f 20 5f 2c 2d 2e 20 20 20 29 20 20
+>2170	20 20 20 20 5f 2c 2e 2d 27 0d
+>217a	20 20 20 20 20 20 20 20		        .text   "             `    G.m-'^m'm'        Dmytro O. Redchuk",CR
+>2182	20 20 20 20 20 60 20 20 20 20 47 2e 6d 2d 27 5e
+>2192	6d 27 6d 27 20 20 20 20 20 20 20 20 44 6d 79 74
+>21a2	72 6f 20 4f 2e 20 52 65 64 63 68 75 6b 0d
+>21b0	00				        .text	0
+>21b1	0a 0a				ANYKEY:	.text	LF,LF
+>21b3	50 72 65 73 73 20 74 68			.text 	"Press the ANY key to return to monitor:"
+>21bb	65 20 41 4e 59 20 6b 65 79 20 74 6f 20 72 65 74
+>21cb	75 72 6e 20 74 6f 20 6d 6f 6e 69 74 6f 72 3a
+>21da	00					.text	0
 
 ;******  End of listing
