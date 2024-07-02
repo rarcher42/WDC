@@ -91,7 +91,7 @@ PRINT_AT_X	LDA	$0000,X		; X points to the first byte on entry
 PRAXIT		RTS	
 
 QBFMSG	.text 	CR,CR
-	.text	"               VCBmon-186 v0.01",CR,CR,CR
+	.text	"               VCBmon-186 v0.01",CR
 	.text 	"         ******************************",CR
 	.text 	"         *                            *",CR
 	.text 	"         *    The Quick brown Dog     *",CR
