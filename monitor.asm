@@ -1,59 +1,97 @@
-	*= $2000
 
-	; VIA registers
-	MMU_MEM_CTRL = $0001
-	MMU_IO_CTRL = $0001
+; Assembled with 64TASS
+; 		64tass -c bootloader.asm -L bootloader.lst
+; 
+;
+; "Kernal"'s of truth:
+;
+MON_GETC	= $E036	; Get character
+MON_PUTC	= $E04B	; Put character
+MON_ENTRY	= $E0B0
 
-	TEXT_BASE = $C000			; Note: This is in I/O page 2
-	COLOR_CHOICE_BASE = TEXT_BASE		; Note: This is in I/O page 3
+CTRL_C		= 3
+LF		= 10
+CR		= 13
+SP		= 32
 
-	FG_LUT_BASE = $D800
-	BG_LUT_BASE = $D840
-	CLUT_SIZE = 4
+MASK0		= %00000001
+MASK1		= %00000010
+MASK2		= %00000100
+MASK3		= %00001000
+MASK4		= %00010000
+MASK5		= %00100000
+MASK6 		= %01000000
+MASK7		= %10000000
 
+; Flag definition to OR for SEP, REP
+N_FLAG		= MASK7
+V_FLAG		= MASK6
+M_FLAG		= MASK5
+X_FLAG		= MASK4
+D_FLAG		= MASK3
+I_FLAG		= MASK2
+Z_FLAG		= MASK1
+C_FLAG		= MASK0
 
-	BLUE_OFFSET = 0
-	GREEN_OFFSET = 1
-	RED_OFFSET = 2
-	ALPHA_OFFSET = 3
+        .cpu    "65816"
+        .as     ; A=8 bits
+        .xl     ; X, Y = 16 bits
 
+; Direct page fun
+	.org $0030
+TERM_FLAGS	.byte 	0
+STACKTOP	= $6FFF				; Put stack near top of RAM
 
-start
-	lda MMU_IO_CTRL
-	pha			; Save entry I/O page mapping
-	; Set up foreground and backgrond color LUT entries
-	lda #$02		; Set I/O page to 2
-	sta MMU_IO_CTRL
-	; Set up a foreground and background entry
-	stz FG_LUT_BASE+1*CLUT_SIZE+BLUE_OFFSET		; Foreground(1) Blue = $00
-	lda #$80		; BGR= $008080 (yellow)
-	sta FG_LUT_BASE+1*CLUT_SIZE+GREEN_OFFSET	
-	sta FG_LUT_BASE+1*CLUT_SIZE+RED_OFFSET
-	lda #$FF
-	sta BG_LUT_BASE+0*CLUT_SIZE+BLUE_OFFSET		; Background(0)=$FF0000 = Blue
-	stz BG_LUT_BASE+0*CLUT_SIZE+GREEN_OFFSET
-	stz BG_LUT_BASE+0*CLUT_SIZE+RED_OFFSET		
-	
-	ldx #$FF
-	lda #'*'
-nextchar
-	sta TEXT_BASE,x		; Store character in first 256 bytes of text buffer memory
-	dex
-	bne nextchar	
-	
-	lda #$03		; Set I/O page to 3
-	sta MMU_IO_CTRL		
-	ldx #$FF		; Now fill in color table to FG=1 BG=0 ($10)
-	lda #$10
-nextcolor
-	sta COLOR_CHOICE_BASE,x
-	dex
-	bne nextcolor 		
-	
-	pla			; restore entry I/O page mapping
-	sta MMU_IO_CTRL
+* = $2000	; RAM load address
+START 		CLC	
+		XCE				; Native mode
+		SEP	#(M_FLAG)		; A,M = 8bit
+		REP	#(X_FLAG | D_FLAG)	; 16 bit index, binary math
+		; LDX	#STACKTOP
+		; TXS				; Set stack to STACKTOP
+	        LDA	#$80
+		STA	TERM_FLAGS	; For now, just ECHO bit 7
+REPEAT	        LDX	#QBFMSG
+		JSR	PUT_STR		; Print the string at A:X
+		LDX	#ANYKEY		
+		JSR	PUT_STR
+		JSR	GET_CHR_ECHO	; Read in the ANY key
+		CMP	#CTRL_C		; SPACE key is the ANY key
+		BNE	REPEAT
+		BRK
+		.byte	$EA
+		
+PUT_STR		LDA	0,X		; X points directly to string
+		BEQ	PUTSX
+		JSL	MON_PUTC	; print the character
+		INX			; point to next character
+		BRA	PUT_STR		
+PUTSX:		RTS
 
-loop
-	bra loop
-	rts
+GET_CHR	        JSL	MON_GETC
+		BIT	TERM_FLAGS	; Check for ECHO flag (b7)
+		BPL	GCHC1
+		JSL	MON_PUTC	; echo it back
+GCHC1		RET
+
+QBFMSG	.text 	CR,CR
+	.text	"                  VCBmon v 1.00",CR
+	.text 	"          ******************************",CR
+	.text 	"          *                            *",CR
+	.text 	"          *    The Quick brown Dog     *",CR
+	.text 	"          *  Jumps over the Lazy Fox!  *",CR
+	.text 	"          *                            *",CR
+	.text 	"          ******************************",CR
+
+ 	.text	"        _,-=._              /|_/|",CR
+ 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR
+ 	.text   "          `._ _,-.   )      _,.-'",CR
+        .text   "             `    G.m-'^m'm'",CR
+	.text   "          Foxy art by: Dmytro O. Redchuk",CR,CR
+        .text	0
+
+ANYKEY:	.text	LF,LF
+	.text 	"Press the ANY key (CTRL-C) to return to monitor",CR
+	.text   "else continue foxing:"
+	.text	0
 

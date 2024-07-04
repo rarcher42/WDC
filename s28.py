@@ -1,3 +1,4 @@
+import sys
 
 def calc_checksum(line):
     print("calc_checksum({:s})".format(line))
@@ -63,7 +64,14 @@ def conv_s1_to_s2(s1_line):
         return rt
 
 if __name__ == '__main__':
-    FILENAME = input("Filename?:")
+    try:
+        FILENAME = sys.argv[1]
+        FILENAME = FILENAME.replace('.hex', '')
+        print(FILENAME)
+    except:
+        print("USE: s28 <filename>")
+        sys.exit(-1)
+        
     print("Converting %s --> %s" % (FILENAME+".hex", FILENAME+".s28"))
     fh = open(FILENAME+".hex", 'r')
     srec_list = fh.readlines()
