@@ -93,6 +93,7 @@ CTR_B		.byte	?
 SA_L		.byte 	?	; Starting address storage
 SA_H		.byte 	?
 SA_B		.byte	?
+
 SA			=		SA_L
 DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
 ; A variety of temporary-use variables at discretion and care of coder
@@ -258,7 +259,9 @@ CRLF		LDA		#CR
 			JSL		PUT_CHR
 			RTL
 			
-RUNSPOTRUN	LDY		#MSG_6HEX
+RUNSPOTRUN	LDA		#CR
+			JSL		PUT_CHR
+			LDY		#MSG_6HEX
 			JSL		PUT_STR
 			JSL		GETHEX
 			STA		SA_B
@@ -278,7 +281,12 @@ RUNSPOTRUN	LDY		#MSG_6HEX
 			JSR		PUTHEX
 			LDA		#CR
 			JSL		PUT_CHR
-			JMP		[SA]
+			LDY		MSG_CONFIRM
+			JSL		PUT_STR
+			JSL		GET_CHR
+			CMP		#'Y'
+			BNE		RUNSPOTRUN
+			JMP		[SA_B]
 							
 
 ;-----------------------------------------------------------------------------------
@@ -647,6 +655,9 @@ MSG_LOADER
 	
 MSG_6HEX	
 	.text	CR,"Enter 6 digit hex address:",0
+	
+MSG_CONFIRM
+	.text	CR,"Is this correct (Y/x)?:",0
 
 QBFMSG	.text 		CR,CR
 	.text	"                  VCBmon v 1.00",CR
