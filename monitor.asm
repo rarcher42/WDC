@@ -3,7 +3,9 @@
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
 ;
-
+; Monitor hooks
+GET_CHAR_265	=	$E036
+PUT_CHAR_265	= 	$E04B
 CTRL_C	= 3
 BS		= 8
 LF		= 10
@@ -48,6 +50,25 @@ SYSTEM_VIA_PCR      =	SYS_VIA_BASE+12	; Peripheral control register
 SYSTEM_VIA_IFR	    =	SYS_VIA_BASE+13 ; Interrupt flag register
 SYSTEM_VIA_IER      = 	SYS_VIA_BASE+14	; Interrupt enable register
 SYSTEM_VIA_ORA_IRA  =	SYS_VIA_BASE+15	; Port A IO register, but no handshake
+
+DEBUG_VIA_BASE	    = 	$7FC0
+DEBUG_VIA_IORB     =  	DEBUG_VIA_BASE+0	; Port B IO register
+DEBUG_VIA_IORA     =	DEBUG_VIA_BASE+1 	; Port A IO register
+DEBUG_VIA_DDRB     = 	DEBUG_VIA_BASE+2	; Port B data direction register
+DEBUG_VIA_DDRA     = 	DEBUG_VIA_BASE+3	; Port A data direction register
+DEBUG_VIA_T1C_L    =	DEBUG_VIA_BASE+4 	; Timer 1 counter/latches, low-order
+DEBUG_VIA_T1C_H    = 	DEBUG_VIA_BASE+5	; Timer 1 high-order counter
+DEBUG_VIA_T1L_L    = 	DEBUG_VIA_BASE+6	; Timer 1 low-order latches
+DEBUG_VIA_T1L_H    = 	DEBUG_VIA_BASE+7	; Timer 1 high-order latches
+DEBUG_VIA_T2C_L    = 	DEBUG_VIA_BASE+8	; Timer 2 counter/latches, lower-order
+DEBUG_VIA_T2C_H    = 	DEBUG_VIA_BASE+9	; Timer 2 high-order counter
+DEBUG_VIA_SR       = 	DEBUG_VIA_BASE+10	; Shift register
+DEBUG_VIA_ACR      = 	DEBUG_VIA_BASE+11	; Auxilliary control register
+DEBUG_VIA_PCR      =	DEBUG_VIA_BASE+12	; Peripheral control register
+DEBUG_VIA_IFR	    =	DEBUG_VIA_BASE+13 ; Interrupt flag register
+DEBUG_VIA_IER      = 	DEBUG_VIA_BASE+14	; Interrupt enable register
+DEBUG_VIA_ORA_IRA  =	DEBUG_VIA_BASE+15	; Port A IO register, but no handshake
+
 ; System VIA Port B named bitmasks
 PB0 = MASK0
 PB1 = MASK1
@@ -67,15 +88,28 @@ PA5 = MASK5
 PA6 = MASK6
 PA7 = MASK7
 
+;;; ============================= 65c51 UART functions ======================================
+; 65C51 ACIA equates for serial I/O
+;
+ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
+SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+SSR = ACIA_BASE+1     		; Serial data status register
+SCMD = ACIA_BASE+2     		; Serial command reg. ()
+SCTL = ACIA_BASE+3     		; Serial control reg. ()
+TX_RDY = MASK4
+RX_RDY = MASK3
+
+
 ALL_INPUTS = $00
 ALL_OUTPUTS = $FF
+; Put the above equates into an included file per peripheral or board
 
         .cpu    "65816"
         .as     			; A=8 bits
         .xl     			; X, Y = 16 bits
 
 ; Direct page fun
-*=$90
+*=$E0
 TERM_FLAGS	.byte	?					; Pick somewhere not used by WDCmon
 	ECHO_FLAG	= MASK6						; Use bit 6 so BIT can be used
 	
@@ -102,6 +136,7 @@ EXTRA		.byte	? 	; Used inside loader.  Please don't use elsewhere
 TEMP2		.byte	?
 SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
 CHART		.byte	?
+DEBUG		.byte 	?
 
 
 * = $0400			; Command buffer area
@@ -110,8 +145,10 @@ BUFPTR		.byte	?
 CMDBUF 		.fill	254					;	 
 
 STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
-* = $F800	
-START 		SEI
+* = $2000		
+START 		BRA		MONPROMPT			;
+			; 816 board initialization.  Skip while developing monitor on 265 board
+			SEI
 			CLC	
 			XCE							; Native mode
 			SEP		#(M_FLAG)			; A,M = 8bit
@@ -127,19 +164,25 @@ START 		SEI
 			LDX		#$0000
 			PHX
 			PLD	
-			;
-			LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-			STA 	SCTL		
-			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-			STA     SCMD
+			
 			JSL		INIT_FIFO
-			JSL		INITSER
+			JSL		INIT_SER
+			;
 MONPROMPT	LDY		#QBFMSG
 			JSL		PUT_STR
 			JSL		GETLINE
 			JSL		PROCESS_LINE
-			JMP		MONPROMPT
+			BRA		MONPROMPT
 			
+; Test code for balky (possibly decoder issue!) SX816 board
+ECHO		JSL		GETCHF
+			BRA		ECHO
+BLABBER		JSL		TXCHDLY
+			LDA		#'*'
+			STA		SDR
+			JSL		PUTCHF
+			BRA		BLABBER
+					
 				
 PUT_STR		LDA		0,Y				; Y points directly to string
 			BEQ		PUTSX
@@ -147,54 +190,45 @@ PUT_STR		LDA		0,Y				; Y points directly to string
 			INY						; point to next character
 			BRA		PUT_STR		
 PUTSX:		RTL		
-		
+	
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
 ; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
 ;
-;;; ============================= 65c51 UART functions ======================================
-; 65C51 ACIA equates for serial I/O
-;
-ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
-SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
-SSR = ACIA_BASE+1     		; Serial data status register
-SCMD = ACIA_BASE+2     		; Serial command reg. ()
-SCTL = ACIA_BASE+3     		; Serial control reg. ()
-TX_RDY = MASK4
-RX_RDY = MASK3
+
 SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
 SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
 ; Set up baud rate, parity, stop bits, interrupt control, etc. for
 ; the serial port.
-INITSER LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-		STA 	SCTL		
-		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-		STA     SCMD
-		RTL
+INIT_SER	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+			STA 	SCTL		
+			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA     SCMD
+			RTL
 
-MON_GETC
-	; Fallthrough - the intent is for MON_GETC to choose the input device
-GETSER	LDA		SSR
-		AND		#RX_RDY
-		BEQ		GETSER
-		LDA		SDR
-		CLC					; Temporary compatibility return value for blocking/non-blocking
-		RTL
 
-MON_PUTC
-	; Fallthrough - the intent is to have MON_PUTC choose the output device 
-PUTSER	PHA
-		STA		SDR
-	 	JSL		TXCHDLY		; Awful kludge
-		PLA
-		CLC					; Temporary compatibility return value for integration for blocking/non-blocking
-		RTL
+GETSER		LDA		SSR
+			AND		#RX_RDY
+			BEQ		GETSER
+			LDA		SDR
+			CLC					; Temporary compatibility return value for blocking/non-blocking
+			RTL
+
+
+
+PUTSER		PHA
+			STA		SDR
+			JSL		TXCHDLY		; Awful kludge
+			PLA
+			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
+			RTL
 		
 ; Raw I/O wrappers to simplify changing I/O ports.  Probably temporary
 PUT_CHR		JSL		MON_PUTC
 			RTL
 			
 GET_CHR	    JSL		MON_GETC
+			JSL		TOPUPPER	; Make alphabetics Puppercase
 			STA		CHART
 			BIT		TERM_FLAGS	; Check for ECHO flag (b7)
 			BVC		GCHC1		; Bit 6 = ECHO
@@ -224,7 +258,14 @@ GSXIT1		DEX							; discard the CR
 GSXIT2		STZ		0,X					; null-terminate the line
 			RTL
 			
-
+TOPUPPER	CMP		#'a'				; Make character PupperCase
+			BCC		PUPX1				; A < 'a' so can't be lowercase char
+			CMP		#'z'+1				
+			BCS		PUPX1				; A > 'z', so can't be lowercase char	
+			; Note - carry is clear so we subtract one less
+			SBC		#'a'-'A'-1			; Adjust upper case to lower case		
+PUPX1		RTL		
+			
 
 ; ==============================================================================================================================
 PROCESS_LINE	
@@ -272,21 +313,24 @@ RUNSPOTRUN	LDA		#CR
 			LDY		#MSG_JUMPING
 			JSL		PUT_STR
 			LDA		SA_B
-			JSR		PUTHEX
+			JSL		PUTHEX
 			LDA		#':'
-			JSR		PUT_CHR
+			JSL		PUT_CHR
 			LDA		SA_H
-			JSR		PUTHEX
+			JSL		PUTHEX
 			LDA		SA_L
-			JSR		PUTHEX
+			JSL		PUTHEX
 			LDA		#CR
 			JSL		PUT_CHR
-			LDY		MSG_CONFIRM
+			LDY		#MSG_CONFIRM
 			JSL		PUT_STR
 			JSL		GET_CHR
+			JSL		PUT_CHR
 			CMP		#'Y'
 			BNE		RUNSPOTRUN
-			JMP		[SA_B]
+			JML		[SA_B]
+	
+		
 							
 
 ;-----------------------------------------------------------------------------------
@@ -306,7 +350,7 @@ SYNC	JSL		GET_CHR				; Wait for "S" to start a new record
 		CMP		#'S'
 		BNE		SYNC
 		LDA		#'@'
-		STA		SDR
+		JSL		PUT_CHR
 		; Optimistically assume start of record.
 		JSL		GET_CHR
 		STA		REC_TYPE										
@@ -333,14 +377,14 @@ SLC1	CMP		#'9'
 		; We'll ignore everything else, including the HDR record
 SLC3	JML		SYNC
 
-GETREMS	LDA		#'S'
+GETREMS	LDA		#'0'
 		JSL		PUT_CHR
-		LDA		#'0'
+		LDA		#'#'
 		JSL		PUT_CHR
 		JML		SYNC
 GET24ADDR
 		LDA		#'2'
-		STA		SDR
+		JSL		PUT_CHR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#4			; Data length -= 3 bytes address + 1 byte checksum 
@@ -350,7 +394,7 @@ GET24ADDR
 		BRA		GET1624
 GET16ADDR
 		LDA		#'1'
-		STA		SDR
+		JSL		PUT_CHR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#3			; Data length -= 2 bytes address + 1 byte checksum 
@@ -370,17 +414,16 @@ SAVDAT2	JSL		GETHEX
 		DEC		DATA_CNT
 		BNE		SAVDAT2
 SAVDX1	LDA		#'#'
-		STA		SDR
+		JSL		PUT_CHR
 		JML		SYNC		; FIXME: parse the checksum and end of line
 		
 ; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
 CNT16	LDA		#'5'
-		STA		SDR
 		JSL		PUT_CHR
 		STZ		CTR_B
 		BRA		CN16C1
 CNT24:	LDA		#'6'
-		STA		SDR
+		JSL		PUT_CHR
 		JSL		GETHEX
 		STA		CTR_B
 CN16C1	JSL		GETHEX		; bits 15-8
@@ -388,16 +431,16 @@ CN16C1	JSL		GETHEX		; bits 15-8
 		JSL		GETHEX		; bits 7-0
 		STA		CTR_L
 		LDA		#'#'
-		STA		SDR
+		JSL		PUT_CHR
 		JML		SYNC		; FIXME: parse the rest of the record & end of line
 
 ; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
 SA16	LDA		#'9'
-		STA		SDR
+		JSL		PUT_CHR
 		STZ		SA_B
 		BRA		SA16C1
 SA24	LDA		#'8'
-		STA		SDR
+		JSL		PUT_CHR
 		JSL		GETHEX		; length byte
 		STZ		SA_B
 SA16C1	JSL		GETHEX		; bits 15-8
@@ -405,7 +448,10 @@ SA16C1	JSL		GETHEX		; bits 15-8
 		JSL		GETHEX		; bits 7-0
 		STA		SA_L
 		LDA		#'&'
-		STA		SDR
+		JSL		PUT_CHR
+GOEOL	JSL		GET_CHR
+		CMP		#CR
+		BNE		GOEOL
 		JML		MONPROMPT
 
 ; 24 bit binary pointer increment.  We're in 8 bit accumulator mode, so it's 3 bytes.
@@ -458,6 +504,7 @@ FIFO_RXF = PB1
 FIFO_WR = PB2
 FIFO_RD = PB3
 FIFO_PWREN = PB5
+FIFO_DEBUG = PB7		; Handy debug toggle output free for any use
 
 
 ; On exit:
@@ -490,7 +537,7 @@ SEL_BANK3
 		LDA		#%11111111
 		STA		SYSTEM_VIA_PCR	
 		RTL
-		
+	
 SEL_BANK2
 		LDA		#%11111101
 		STA		SYSTEM_VIA_PCR	
@@ -512,7 +559,8 @@ INIT_SYSVIA
 		STZ		SYSTEM_VIA_DDRA
 		STZ		SYSTEM_VIA_DDRB
 		RTL
-		
+	
+; NOTE:  DO NOT CALL THIS if you're not powering via micro USB as the FIFO chip will never get power and become ready!	
 INIT_FIFO
 		LDA		#$FF
 		STA     SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
@@ -521,12 +569,11 @@ INIT_FIFO
 		STZ		SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
 		LDA		#FIFO_RD				;
 		STA		SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-		LDA		#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
+		LDA		#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
 		STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
 		; Defensively wait for ports to settle 
-		NOP		; FIXME: Defensive and possibly unnecessary
-		RTL		; FUBAR - premature exit
-FIFOPWR
+		RTL								; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
+FIFOPWR	NOP								; FIXME: Defensive and possibly unnecessary
 		; FIXME: Add timeout here
 		LDA		SYSTEM_VIA_IORB
 		AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
@@ -538,45 +585,56 @@ FIFOPWR
 ; If the FIFO is full, it will return immediately with the carry set (C=1)
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is clear.
+MON_PUTC
+		JSL 	PUT_CHAR_265			; Temporarily use 265 eval board for I/O
+		CLC
+		RTL
+		
 PUTCHF	STA		TEMP2
-		LDA		SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
-		AND		#FIFO_TXE			; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-		SEC							; FIFO is full, so don't try to queue it!	
-		BNE		OFX1				; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+		LDA		SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
+		AND		#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+		SEC								; FIFO is full, so don't try to queue it!	
+		BNE		OFX1					; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 		; FIFO has room - write A to FIFO in a series of steps
-OFCONT	STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
-		LDA		#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+OFCONT	STZ		SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
+		LDA		#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 		STA		SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
 		LDA		TEMP2					; Restore the data to send
 		STA		SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
 		LDA		#$FF					; make Port A all outputs with stable output value already set in prior lines
 		STA		SYSTEM_VIA_DDRA			; Save data to output latches
-		NOP							; Some settling time of data output just to be safe
+		NOP								; Some settling time of data output just to be safe
 		NOP
 		NOP
 		NOP
 		NOP
 		NOP
 		; Now the data's stable on PA0-7, pull WR line low (leave RD high)
-		LDA	#(FIFO_RD)		; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
-		STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
-		NOP				; Hold time following write strobe, to ensure value is latched OK
+		LDA		#(FIFO_RD)			; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
+		STA		SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
+		NOP		; Hold time following write strobe, to ensure value is latched OK
 		NOP
 		NOP
 		NOP
 		NOP
 		NOP
-		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+		STZ		SYSTEM_VIA_DDRA		; Make port A an input again
 		CLC				; signal success of write to caller
 OFX1	LDA		TEMP2
 		RTL
 ;
 ;
+	
+MON_GETC
+		JSL		GET_CHAR_265
+		CLC
+		RTL
 		
 ; On exit:
 ; If Carry flag is clear, A contains the next byte from the FIFO
 ; If carry flag is set, there were no characters waiting
-GETCHF	LDA		SYSTEM_VIA_IORB		; Check RXF flag
+GETCHF	
+		LDA		SYSTEM_VIA_IORB		; Check RXF flag
 		AND		#FIFO_RXF			; If clear, we're OK to read.  If set, there's no data waiting
 		SEC
 		BNE 	INFXIT				; If RXF is 1, then no character is waiting!
