@@ -95,65 +95,118 @@ SA_H		.byte 	?
 SA_B		.byte	?
 SA			=		SA_L
 DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
-EXTRA		.byte	? 	; Used inside loader.  Otherwise, free for use
-TEMP 	  	.byte	?	; May be used within any subroutine 
-TAMP		.byte 	?	; For testing only
+; A variety of temporary-use variables at discretion and care of coder
+TEMP		.byte 	?
+EXTRA		.byte	? 	; Used inside loader.  Please don't use elsewhere
+TEMP2		.byte	?
+SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
 CHART		.byte	?
 
-STACKTOP	=		$01FF			 ; FIXME: revisit memory map allocations
 
-* = $F800	
+* = $0400			; Command buffer area
 BUFPTR		.byte	?
 			.byte 	?
 CMDBUF 		.fill	254					;	 
+
+STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $F800	
 START 		SEI
 			CLC	
 			XCE							; Native mode
 			SEP		#(M_FLAG)			; A,M = 8bit
 			REP		#(X_FLAG | D_FLAG)	; 16 bit index, binary math
+			NOP
 			LDX		#STACKTOP
 			TXS
-			LDA		#ECHO_FLAG			; Turn on ECHO
-			STA		TERM_FLAGS			; For now, just ECHO bit 6
-			JSL		INITSER
-			JSL		INIT_FIFO			; initialize the VIA2 and FIFO for comms
+			; Load the Databank register (DBR) to $0000
+			LDA		#$00
+			PHA
+			PLD
+			; Load the direct page register to $0000
+			LDX		#$0000
+			PHX
+			PLD	
 			;
-MONITOR		LDA		"*"
-			JSL		PUTSER
-			BRA		MONITOR				; monitor bras?
-			LDY		#PROMPT
+			LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+			STA 	SCTL		
+			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA     SCMD
+			JSL		INIT_FIFO
+			JSL		INITSER
+MONPROMPT	LDY		#QBFMSG
 			JSL		PUT_STR
+			JSL		GETLINE
 			JSL		PROCESS_LINE
-			JSL		CRLF
-			BRA		MONITOR
+			JMP		MONPROMPT
+			
+				
+PUT_STR		LDA		0,Y				; Y points directly to string
+			BEQ		PUTSX
+			JSL		PUT_CHR
+			INY						; point to next character
+			BRA		PUT_STR		
+PUTSX:		RTL		
 		
-PROCESS_LINE	
-			LDA		#'"'
-			JSL		PUT_CHR
-			LDY		#CMDBUF
-			JSL		PUT_STR
-			LDA		#'"'
-			JSL		PUT_CHR
-			JSL		CRLF
-			LDA		CMDBUF
-			CMP		#'L'
-			BNE		PLIC2
-			LDY		#MSG_LOADER
-			JSL		PUT_STR
-			JSL 	SREC_LOADER
-PLIC2		CMP		#CTRL_C
-			BNE		PLIX1
-			BRK							; return to system monitor
-PLIX1		RTL
+; Quick n'dirty assignments instead of proper definitions of each parameter
+; "ORed" together to build the desired flexible configuration.  We're going
+; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+;
+;;; ============================= 65c51 UART functions ======================================
+; 65C51 ACIA equates for serial I/O
+;
+ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
+SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+SSR = ACIA_BASE+1     		; Serial data status register
+SCMD = ACIA_BASE+2     		; Serial command reg. ()
+SCTL = ACIA_BASE+3     		; Serial control reg. ()
+TX_RDY = MASK4
+RX_RDY = MASK3
+SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INITSER LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+		STA 	SCTL		
+		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+		STA     SCMD
+		RTL
 
-CRLF		LDA		#CR
-			JSL		PUT_CHR
-			LDA		#LF
-			JSL		PUT_CHR
-			RETL
+MON_GETC
+	; Fallthrough - the intent is for MON_GETC to choose the input device
+GETSER	LDA		SSR
+		AND		#RX_RDY
+		BEQ		GETSER
+		LDA		SDR
+		CLC					; Temporary compatibility return value for blocking/non-blocking
+		RTL
 
-GETLINE		LDX		#CMDBUF	
+MON_PUTC
+	; Fallthrough - the intent is to have MON_PUTC choose the output device 
+PUTSER	PHA
+		STA		SDR
+	 	JSL		TXCHDLY		; Awful kludge
+		PLA
+		CLC					; Temporary compatibility return value for integration for blocking/non-blocking
+		RTL
+		
+; Raw I/O wrappers to simplify changing I/O ports.  Probably temporary
+PUT_CHR		JSL		MON_PUTC
+			RTL
+			
+GET_CHR	    JSL		MON_GETC
+			STA		CHART
+			BIT		TERM_FLAGS	; Check for ECHO flag (b7)
+			BVC		GCHC1		; Bit 6 = ECHO
+			LDA		CHART
+			JSL		PUT_CHR		; echo on; repeat it back
+GCHC1		CMP		#CTRL_C
+			BNE		GCHC2
+			JML		MONPROMPT			; FIXME: FUBAR stack memory leak
+GCHC2		LDA		CHART
+			RTL
+GETLINE		LDA		#ECHO_FLAG		
+			STA		TERM_FLAGS			; Echo back while editing
+			LDX		#CMDBUF	
 GSLP1		JSL		GET_CHR				; With or without echo
 			CMP		#LF
 			BEQ		GSLP1
@@ -170,59 +223,224 @@ GSXIT1		DEX							; discard the CR
 GSXIT2		STZ		0,X					; null-terminate the line
 			RTL
 			
-; Raw I/O wrappers to simplify changing I/O ports.  Probably temporary
-PUT_CHR		JSL		MON_PUTC
+
+
+; ==============================================================================================================================
+PROCESS_LINE	
+			LDA		#'"'
+			JSL		PUT_CHR
+			LDY		#CMDBUF
+			JSL		PUT_STR
+			LDA		#'"'
+			JSL		PUT_CHR
+			JSL		CRLF
+			LDA		CMDBUF
+			STA		SDR					; FUBAR - debug of command character
+			CMP		#'L'
+			BNE		PLIC2
+			LDY		#MSG_LOADER
+			JSL		PUT_STR
+			JSL 	SREC_LOADER
+PLIC2		CMP		#'G'
+			BNE 	PLIC3
+			JSL		RUNSPOTRUN
+PLIC3		CMP		#'J'
+			BNE		PLIC9
+			JSL		RUNSPOTRUN
+PLIC9		CMP		#CTRL_C
+			BNE		PLIX1
+			BRK							; return to system monitor
+PLIX1		RTL
+
+CRLF		LDA		#CR
+			JSL		PUT_CHR
+			LDA		#LF
+			JSL		PUT_CHR
 			RTL
 			
-GET_CHR	    JSL		MON_GETC
-			STA		CHART
-			BIT		TERM_FLAGS	; Check for ECHO flag (b7)
-			BVC		GCHC1		; Bit 6 = ECHO
-			LDA		CHART
-			JSL		PUT_CHR	; echo on; repeat it back
-GCHC1		CMP		#CTRL_C
-			BNE		GCHC2
-			JML		MONITOR			; FIXME: FUBAR stack memory leak
-GCHC2		LDA		CHART
-			RTL
+RUNSPOTRUN	LDY		#MSG_6HEX
+			JSL		PUT_STR
+			JSL		GETHEX
+			STA		SA_B
+			JSL		GETHEX
+			STA		SA_H
+			JSL		GETHEX
+			STA		SA_L
+			LDY		#MSG_JUMPING
+			JSL		PUT_STR
+			LDA		SA_B
+			JSR		PUTHEX
+			LDA		#':'
+			JSR		PUT_CHR
+			LDA		SA_H
+			JSR		PUTHEX
+			LDA		SA_L
+			JSR		PUTHEX
+			LDA		#CR
+			JSL		PUT_CHR
+			JMP		[SA]
+							
 
-			
-PUT_STR		LDA		0,Y				; X points directly to string
-			BEQ		PUTSX
-			JSL		PUT_CHR			; print the character
-			INY							; point to next character
-			BRA		PUT_STR		
-PUTSX:		RTL
-
-;;;; ============================= 65c51 UART functions ======================================
-; 65C51 ACIA equates for serial I/O
+;-----------------------------------------------------------------------------------
+; S-record loader 
+;S0 06 0000 484452 1B (HDR)
+;S1 23 F800 78D8A2FF9A2033F9A2F8A0AE206EF9204BF9A9F88522A9008521A9028525A900 A5
+;S5 03 0013 E9
+;S9 03 F800 04
+; (spaces added for readability; not part of the format)
 ;
-ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
-SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
-SSR = ACIA_BASE+1     		; Serial data status register
-SCMD = ACIA_BASE+2     		; Serial command reg. ()
-SCTL = ACIA_BASE+3     		; Serial control reg. ()
-TX_RDY = MASK4
-RX_RDY = MASK3
-; Quick n'dirty assignments instead of proper definitions of each parameter
-; "ORed" together to build the desired flexible configuration.  We're going
-; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+; FIXME: This is a hyper-minimal loader, in fine board bring up tradition.
+; Will probably use this loader to develop a much better loader :D
+SREC_LOADER	
+		LDA		#0					; No echo
+		STA		TERM_FLAGS
+SYNC	JSL		GET_CHR				; Wait for "S" to start a new record
+		CMP		#'S'
+		BNE		SYNC
+		LDA		#'@'
+		STA		SDR
+		; Optimistically assume start of record.
+		JSL		GET_CHR
+		STA		REC_TYPE										
+		JSL		GETHEX				; Get message length byte
+		STA		DATA_CNT			; Save number of bytes in record
+		LDA		REC_TYPE			; Decode and dispatch	
+		BEQ		GETREMS				; read the comment block
+		CMP		#'1'
+		BEQ		GET16ADDR
+		CMP		#'2'
+		BEQ		GET24ADDR
+		CMP		#'5'
+		BNE		SLC4
+		JML		CNT16
+SLC4	CMP		#'6'
+		BNE		SLC2
+		JML		CNT24
+SLC2	CMP		#'8'
+		BNE		SLC1
+		JML		SA24		; Too far for relative branch
+SLC1	CMP		#'9'
+		BNE		SLC3
+		JML		SA16
+		; We'll ignore everything else, including the HDR record
+SLC3	JML		SYNC
+
+GETREMS	LDA		#'S'
+		JSL		PUT_CHR
+		LDA		#'0'
+		JSL		PUT_CHR
+		JML		SYNC
+GET24ADDR
+		LDA		#'2'
+		STA		SDR
+		LDA		DATA_CNT	
+		SEC		
+		SBC		#4			; Data length -= 3 bytes address + 1 byte checksum 
+		STA		DATA_CNT	; Adjust data count to include only payload data bytes
+		JSL		GETHEX
+		STA		PTR_B
+		BRA		GET1624
+GET16ADDR
+		LDA		#'1'
+		STA		SDR
+		LDA		DATA_CNT	
+		SEC		
+		SBC		#3			; Data length -= 2 bytes address + 1 byte checksum 
+		STA		DATA_CNT	; Adjust data count to include only payload data bytes
+		STZ		PTR_B		; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
+GET1624	JSL		GETHEX		; Got bank value (or set to 0). Now get high and low address
+		STA		PTR_H
+		JSL		GETHEX
+		STA		PTR_L
+
+; Now check to see if any bytes remain to be written 
+SAVDAT:	LDA		DATA_CNT	; A record can have 0 data bytes, theoretically. So check at top
+		BEQ		SAVDX1		; No more data to PROCESS_LINE
+SAVDAT2	JSL		GETHEX
+		STA		[PTR]		; 24 bit indirect save
+		JSL		INC_PTR		; Point to next byte
+		DEC		DATA_CNT
+		BNE		SAVDAT2
+SAVDX1	LDA		#'#'
+		STA		SDR
+		JML		SYNC		; FIXME: parse the checksum and end of line
+		
+; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
+CNT16	LDA		#'5'
+		STA		SDR
+		JSL		PUT_CHR
+		STZ		CTR_B
+		BRA		CN16C1
+CNT24:	LDA		#'6'
+		STA		SDR
+		JSL		GETHEX
+		STA		CTR_B
+CN16C1	JSL		GETHEX		; bits 15-8
+		STA		CTR_H
+		JSL		GETHEX		; bits 7-0
+		STA		CTR_L
+		LDA		#'#'
+		STA		SDR
+		JML		SYNC		; FIXME: parse the rest of the record & end of line
+
+; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
+SA16	LDA		#'9'
+		STA		SDR
+		STZ		SA_B
+		BRA		SA16C1
+SA24	LDA		#'8'
+		STA		SDR
+		JSL		GETHEX		; length byte
+		STZ		SA_B
+SA16C1	JSL		GETHEX		; bits 15-8
+		STA		SA_H
+		JSL		GETHEX		; bits 7-0
+		STA		SA_L
+		LDA		#'&'
+		STA		SDR
+		JML		MONPROMPT
+
+; 24 bit binary pointer increment.  We're in 8 bit accumulator mode, so it's 3 bytes.
+INC_PTR	INC		PTR_L		; point to the next byte to save to
+		BNE		INCPX1	
+		INC		PTR_H	
+		BNE		INCPX1
+		INC		PTR_B
+INCPX1	RTL
+
+; Basic conversions	
+GETHEX  JSL 	GET_CHR
+		CMP		#CTRL_C
+		BNE		GHECC1
+		LDA		#'^'
+		JSL		PUT_CHR
+		LDA		#'C'
+		JSL		PUT_CHR
+        JML		MONPROMPT
+GHECC1	JSL     MKNIBL  	; Convert to 0..F numeric
+        ASL     A
+        ASL     A
+        ASL     A
+        ASL     A       	; This is the upper nibble
+        AND     #$F0
+        STA     SUBTEMP
+        JSL     GET_CHR
+		CMP		#CTRL_C
+		BNE		GHECC2
+		LDA		#'^'
+		JSL		PUT_CHR
+		LDA		#'C'
+		JSL		PUT_CHR
+		JML		MONPROMPT
+GHECC2	JSL     MKNIBL
+        ORA    	SUBTEMP
+        RTL
+
+
+		
+
 ;
-SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
-SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
 
-
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
-; the serial port.
-INITSER LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-		STA 	SCTL		
-		LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-		STA     SCMD
-		RTL
-
-PUTSER	STA		SDR
-	 	JSL		TXCHDLY		; Awful kludge
-		RTL
 ;----------------    
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
@@ -259,8 +477,37 @@ FIFO_PWREN = PB5
 ;
 ;
 ; 
-INIT_FIFO	
-		STZ     SYSTEM_VIA_PCR			; float CB2 (FAMS) hi so flash A16=1; float CA2 (FA15) hi so flash A15=1 (Bank #3)
+; if not bank #3, call from RAM, not from flash!
+SEL_BANK3
+		LDA		#%11111111
+		STA		SYSTEM_VIA_PCR	
+		RTL
+		
+SEL_BANK2
+		LDA		#%11111101
+		STA		SYSTEM_VIA_PCR	
+		RTL
+		
+SEL_BANK1
+		LDA		#%11011111
+		STA		SYSTEM_VIA_PCR	
+		RTL
+
+SEL_BANK0
+		LDA		#%11011101
+		STA		SYSTEM_VIA_PCR	
+		RTL
+		
+INIT_SYSVIA
+		LDA		#%11111111
+		STA		SYSTEM_VIA_PCR	
+		STZ		SYSTEM_VIA_DDRA
+		STZ		SYSTEM_VIA_DDRB
+		RTL
+		
+INIT_FIFO
+		LDA		#$FF
+		STA     SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
 		STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
 		STZ		SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
 		STZ		SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
@@ -269,33 +516,33 @@ INIT_FIFO
 		LDA		#(FIFO_RD + FIFO_WR)	; Make the FIFO RD and FIFO_WR pins outputs so we can strobe data in and out of the FIFO
 		STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
 		; Defensively wait for ports to settle 
-		NOP								; FIXME: Defensive and possibly unnecessary
+		NOP		; FIXME: Defensive and possibly unnecessary
+		RTL		; FUBAR - premature exit
 FIFOPWR
 		; FIXME: Add timeout here
 		LDA		SYSTEM_VIA_IORB
 		AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
 		BNE		FIFOPWR	
 		RTL
-;
 
 ; Attempt to output the byte in A.
 ; If successful, the carry flag will be Clear (C=0) 
 ; If the FIFO is full, it will return immediately with the carry set (C=1)
 ; Caller is responsible for checking the carry flag with BCC or BCS 
 ; and re-trying if carry is clear.
-PUTCHF  STA		TAMP				; save output character
+PUTCHF	STA		TEMP2
 		LDA		SYSTEM_VIA_IORB		; Read in FIFO status Port for FIFO
 		AND		#FIFO_TXE			; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 		SEC							; FIFO is full, so don't try to queue it!	
 		BNE		OFX1				; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 		; FIFO has room - write A to FIFO in a series of steps
 OFCONT	STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
-		LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
-		STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
-		LDA	TAMP
-		STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
-		LDA	#$FF					; make Port A all outputs with stable output value already set in prior lines
-		STA	SYSTEM_VIA_DDRA			; Save data to output latches
+		LDA		#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+		STA		SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
+		LDA		TEMP2					; Restore the data to send
+		STA		SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
+		LDA		#$FF					; make Port A all outputs with stable output value already set in prior lines
+		STA		SYSTEM_VIA_DDRA			; Save data to output latches
 		NOP							; Some settling time of data output just to be safe
 		NOP
 		NOP
@@ -313,21 +560,10 @@ OFCONT	STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating
 		NOP
 		STZ	SYSTEM_VIA_DDRA		; Make port A an input again
 		CLC				; signal success of write to caller
-OFX1	RTL
-;
-;
-MON_GETC
-		JSL		GETCHF
-		BCS		MON_GETC			; FIXME: Busy wait 
-		RTL							; return the character waiting in the FIFO
-		
-MON_PUTC
-		STA		TEMP
-MPCHC1	LDA		TEMP
-		JSL		PUTCHF	
-		BCS		MPCHC1
+OFX1	LDA		TEMP2
 		RTL
-		
+;
+;
 		
 ; On exit:
 ; If Carry flag is clear, A contains the next byte from the FIFO
@@ -355,7 +591,7 @@ INFXIT	RTL
 
 ; A kludge until timers work to limit transmit speed to avoid TX overruns
 ; This is kind of terrible.  Replace.
-TX_DLY_CYCLES = $06F0		; Not tuned.  As it's temporary, optimum settings are unimportant.
+TX_DLY_CYCLES = $0940			; Not tuned.  As it's temporary, optimum settings are unimportant.
 ; $24FF - reliable
 ; $1280 - reliable
 ; $0940 - reliable
@@ -363,19 +599,19 @@ TX_DLY_CYCLES = $06F0		; Not tuned.  As it's temporary, optimum settings are uni
 ; $06F0 - reliable.  Good enough for now. We're going to use VIA timer for this soon anyway
 ; 
 ; 
-TXCHDLY	LDY		#TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
-		JSL 	DLY_Y
-		RTL
+TXCHDLY		PHY
+			LDY		#TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
 ; Y = 16 bit delay count
-DLY_Y	DEY
-		NOP
-		NOP
-		NOP
-		BNE		DLY_Y
-		RTL
+DLY_Y		DEY
+			NOP
+			NOP
+			NOP
+			BNE		DLY_Y
+			PLY
+			RTL
 
 			
-			
+	
 PUTHEX  	PHA             	;
         	LSR 	A
         	LSR 	A
@@ -392,168 +628,6 @@ NOTHEX  	ADC     #'0'    	; If carry clear, we're 0-9
 PUTCH		JSL		PUT_CHR
 			RTL
 
-;-----------------------------------------------------------------------------------
-; S-record loader 
-;S0 06 0000 484452 1B (HDR)
-;S1 23 F800 78D8A2FF9A2033F9A2F8A0AE206EF9204BF9A9F88522A9008521A9028525A900 A5
-;S5 03 0013 E9
-;S9 03 F800 04
-; (spaces added for readability; not part of the format)
-;
-; FIXME: This is a hyper-minimal loader, in fine board bring up tradition.
-; Will probably use this loader to develop a much better loader :D
-SREC_LOADER	
-		LDA		#0					; No echo
-		STA		TERM_FLAGS
-SYNC	JSL		GET_CHR				; Wait for "S" to start a new record
-		CMP		#'S'
-		BNE		SYNC
-		; Optimistically assume start of record.
-		JSL		GET_CHR
-		STA		REC_TYPE										
-		JSL		GETHEX				; Get message length byte
-		STA		DATA_CNT			; Save number of bytes in record
-		LDA		REC_TYPE			; Decode and dispatch	
-		BEQ		GETREMS				; read the comment block
-		CMP		#'1'
-		BEQ		GET16ADDR
-		CMP		#'2'
-		BEQ		GET24ADDR
-		CMP		#'5'
-		BNE		SLC4
-		JML		CNT16
-SLC4	CMP		#'6'
-		BNE		SLC2
-		JML		CNT24
-SLC2	CMP		#'8'
-		BNE		SLC1
-		JML		SA24		; Too far for relative branch
-SLC1	CMP		#'9'
-		BNE		SLC3
-		JML		SA16
-		; We'll ignore everything else, including the HDR record
-SLC3	JML		SYNC
-
-GETREMS	LDA		#'S'
-		JSL		PUT_CHR
-		LDA		#'0'
-		JSL		PUT_CHR
-		JML		SYNC
-GET24ADDR
-		LDA		DATA_CNT	
-		SEC		
-		SBC		#4			; Data length -= 3 bytes address + 1 byte checksum 
-		STA		DATA_CNT	; Adjust data count to include only payload data bytes
-		JSL		GETHEX
-		STA		PTR_B
-		BRA		GET1624
-GET16ADDR
-		LDA		DATA_CNT	
-		SEC		
-		SBC		#3			; Data length -= 2 bytes address + 1 byte checksum 
-		STA		DATA_CNT	; Adjust data count to include only payload data bytes
-		STZ		PTR_B		; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
-GET1624	JSL		GETHEX		; Got bank value (or set to 0). Now get high and low address
-		STA		PTR_H
-		JSL		GETHEX
-		STA		PTR_L
-
-; Now check to see if any bytes remain to be written 
-SAVDAT:	LDA		DATA_CNT	; A record can have 0 data bytes, theoretically. So check at top
-		BEQ		SAVDX1		; No more data to PROCESS_LINE
-SAVDAT2	JSL		GETHEX
-		STA		[PTR]		; 24 bit indirect save
-		JSL		INC_PTR		; Point to next byte
-		DEC		DATA_CNT
-		BNE		SAVDAT2
-SAVDX1	LDA		#'.'
-		JSL		PUT_CHR
-		JML		SYNC		; FIXME: parse the checksum and end of line
-		
-; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
-CNT16	LDA		#'C'
-		JSL		PUT_CHR
-		LDA		#'5'
-		JSL		PUT_CHR
-		LDA		#'e'
-		JSL		PUT_CHR
-		STZ		CTR_B
-		BRA		CN16C1
-CNT24:	LDA		#'C'
-		JSL		PUT_CHR
-		LDA		#'6'
-		JSL		PUT_CHR
-		LDA		#'e'
-		JSL		PUT_CHR
-		JSL		GETHEX
-		STA		CTR_B
-CN16C1	JSL		GETHEX		; bits 15-8
-		STA		CTR_H
-		JSL		GETHEX		; bits 7-0
-		STA		CTR_L
-		JML		SYNC		; FIXME: parse the rest of the record & end of line
-
-; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
-SA16	LDA		#'E'
-		JSL		PUT_CHR
-		LDA		#'9'
-		JSL		PUT_CHR
-		LDA		#'e'
-		JSL		PUT_CHR
-		STZ		SA_B
-		BRA		SA16C1
-SA24	LDA		#'E'
-		JSL		PUT_CHR
-		LDA		#'8'
-		JSL		PUT_CHR
-		LDA		#'e'
-		JSL		PUT_CHR
-		JSL		GETHEX		; length byte
-		STZ		SA_B
-SA16C1	JSL		GETHEX		; bits 15-8
-		STA		SA_H
-		JSL		GETHEX		; bits 7-0
-		STA		SA_L
-		LDA		#'&'
-		JSL		PUT_CHR
-		JML		MONITOR
-
-
-; 24 bit binary pointer increment.  We're in 8 bit accumulator mode, so it's 3 bytes.
-INC_PTR	INC		PTR_L		; point to the next byte to save to
-		BNE		INCPX1	
-		INC		PTR_H	
-		BNE		INCPX1
-		INC		PTR_B
-INCPX1	RTL
-
-; Basic conversions	
-GETHEX  JSL 	GET_CHR
-		CMP		#CTRL_C
-		BNE		GHECC1
-		LDA		#'^'
-		JSL		PUT_CHR
-		LDA		#'C'
-		JSL		PUT_CHR
-        JML		MONITOR
-GHECC1	JSL     MKNIBL  	; Convert to 0..F numeric
-        ASL     A
-        ASL     A
-        ASL     A
-        ASL     A       	; This is the upper nibble
-        AND     #$F0
-        STA     TEMP
-        JSL     GET_CHR
-		CMP		#CTRL_C
-		BNE		GHECC2
-		LDA		#'^'
-		JSL		PUT_CHR
-		LDA		#'C'
-		JSL		PUT_CHR
-		JML		MONITOR
-GHECC2	JSL     MKNIBL
-        ORA    	TEMP
-        RTL
         ; 
 ; Convert the ASCII nibble to numeric value from 0-F:
 MKNIBL  	CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
@@ -564,9 +638,15 @@ MKNNH   	SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
         	AND     #$0F    	; no upper nibble no matter what
         	RTL             	; and return the nibble
 
+MSG_JUMPING:
+	.text	CR,"Jumping to address:",0
+
 MSG_LOADER
 	.text	CR,"Loader started!",CR
 	.text 	0
+	
+MSG_6HEX	
+	.text	CR,"Enter 6 digit hex address:",0
 
 QBFMSG	.text 		CR,CR
 	.text	"                  VCBmon v 1.00",CR
