@@ -1,0 +1,607 @@
+
+; 64tass Turbo Assembler Macro V1.59.3120 listing file
+; 64tass -c -L monitor.lst --s-record -o monitor.hex monitor.asm
+; Sun Jul 07 18:43:18 2024
+
+;Offset	;Hex		;Monitor	;Source
+
+;******  Processing input file: monitor.asm
+
+=$e036					GET_CHAR_265	=	$E036
+=$e04b					PUT_CHAR_265	= 	$E04B
+=3					CTRL_C	= 3
+=8					BS		= 8
+=10					LF		= 10
+=13					CR		= 13
+=32					SP		= 32
+=$01					MASK0		= %00000001
+=$02					MASK1		= %00000010
+=$04					MASK2		= %00000100
+=$08					MASK3		= %00001000
+=$10					MASK4		= %00010000
+=$20					MASK5		= %00100000
+=$40					MASK6 		= %01000000
+=$80					MASK7		= %10000000
+=$80					N_FLAG		= MASK7
+=$40					V_FLAG		= MASK6
+=$20					M_FLAG		= MASK5
+=$10					X_FLAG		= MASK4
+=$08					D_FLAG		= MASK3
+=$04					I_FLAG		= MASK2
+=$02					Z_FLAG		= MASK1
+=$01					C_FLAG		= MASK0
+=$7fe0					SYS_VIA_BASE	    = 	$7FE0
+=32736					SYSTEM_VIA_IORB     =  	SYS_VIA_BASE+0	; Port B IO register
+=32737					SYSTEM_VIA_IORA     =	SYS_VIA_BASE+1 	; Port A IO register
+=32738					SYSTEM_VIA_DDRB     = 	SYS_VIA_BASE+2	; Port B data direction register
+=32739					SYSTEM_VIA_DDRA     = 	SYS_VIA_BASE+3	; Port A data direction register
+=32740					SYSTEM_VIA_T1C_L    =	SYS_VIA_BASE+4 	; Timer 1 counter/latches, low-order
+=32741					SYSTEM_VIA_T1C_H    = 	SYS_VIA_BASE+5	; Timer 1 high-order counter
+=32742					SYSTEM_VIA_T1L_L    = 	SYS_VIA_BASE+6	; Timer 1 low-order latches
+=32743					SYSTEM_VIA_T1L_H    = 	SYS_VIA_BASE+7	; Timer 1 high-order latches
+=32744					SYSTEM_VIA_T2C_L    = 	SYS_VIA_BASE+8	; Timer 2 counter/latches, lower-order
+=32745					SYSTEM_VIA_T2C_H    = 	SYS_VIA_BASE+9	; Timer 2 high-order counter
+=32746					SYSTEM_VIA_SR       = 	SYS_VIA_BASE+10	; Shift register
+=32747					SYSTEM_VIA_ACR      = 	SYS_VIA_BASE+11	; Auxilliary control register
+=32748					SYSTEM_VIA_PCR      =	SYS_VIA_BASE+12	; Peripheral control register
+=32749					SYSTEM_VIA_IFR	    =	SYS_VIA_BASE+13 ; Interrupt flag register
+=32750					SYSTEM_VIA_IER      = 	SYS_VIA_BASE+14	; Interrupt enable register
+=32751					SYSTEM_VIA_ORA_IRA  =	SYS_VIA_BASE+15	; Port A IO register, but no handshake
+=$7fc0					DEBUG_VIA_BASE	    = 	$7FC0
+=32704					DEBUG_VIA_IORB     =  	DEBUG_VIA_BASE+0	; Port B IO register
+=32705					DEBUG_VIA_IORA     =	DEBUG_VIA_BASE+1 	; Port A IO register
+=32706					DEBUG_VIA_DDRB     = 	DEBUG_VIA_BASE+2	; Port B data direction register
+=32707					DEBUG_VIA_DDRA     = 	DEBUG_VIA_BASE+3	; Port A data direction register
+=32708					DEBUG_VIA_T1C_L    =	DEBUG_VIA_BASE+4 	; Timer 1 counter/latches, low-order
+=32709					DEBUG_VIA_T1C_H    = 	DEBUG_VIA_BASE+5	; Timer 1 high-order counter
+=32710					DEBUG_VIA_T1L_L    = 	DEBUG_VIA_BASE+6	; Timer 1 low-order latches
+=32711					DEBUG_VIA_T1L_H    = 	DEBUG_VIA_BASE+7	; Timer 1 high-order latches
+=32712					DEBUG_VIA_T2C_L    = 	DEBUG_VIA_BASE+8	; Timer 2 counter/latches, lower-order
+=32713					DEBUG_VIA_T2C_H    = 	DEBUG_VIA_BASE+9	; Timer 2 high-order counter
+=32714					DEBUG_VIA_SR       = 	DEBUG_VIA_BASE+10	; Shift register
+=32715					DEBUG_VIA_ACR      = 	DEBUG_VIA_BASE+11	; Auxilliary control register
+=32716					DEBUG_VIA_PCR      =	DEBUG_VIA_BASE+12	; Peripheral control register
+=32717					DEBUG_VIA_IFR	    =	DEBUG_VIA_BASE+13 ; Interrupt flag register
+=32718					DEBUG_VIA_IER      = 	DEBUG_VIA_BASE+14	; Interrupt enable register
+=32719					DEBUG_VIA_ORA_IRA  =	DEBUG_VIA_BASE+15	; Port A IO register, but no handshake
+=$01					PB0 = MASK0
+=$02					PB1 = MASK1
+=$04					PB2 = MASK2
+=$08					PB3 = MASK3
+=$10					PB4 = MASK4
+=$20					PB5 = MASK5
+=$40					PB6 = MASK6
+=$80					PB7 = MASK7
+=$01					PA0 = MASK0
+=$02					PA1 = MASK1
+=$04					PA2 = MASK2
+=$08					PA3 = MASK3
+=$10					PA4 = MASK4
+=$20					PA5 = MASK5
+=$40					PA6 = MASK6
+=$80					PA7 = MASK7
+=$7f80					ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
+=$7f80					SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+=32641					SSR = ACIA_BASE+1     		; Serial data status register
+=32642					SCMD = ACIA_BASE+2     		; Serial command reg. ()
+=32643					SCTL = ACIA_BASE+3     		; Serial control reg. ()
+=$10					TX_RDY = MASK4
+=$08					RX_RDY = MASK3
+=$00					ALL_INPUTS = $00
+=$ff					ALL_OUTPUTS = $FF
+>00e0					TERM_FLAGS	.byte	?					; Pick somewhere not used by WDCmon
+=$40						ECHO_FLAG	= MASK6						; Use bit 6 so BIT can be used
+>00e1					REC_TYPE	.byte 	?
+>00e2					DP_START	.byte	?
+>00e3					PTR_L		.byte	?	; Generic pointer
+>00e4					PTR_H		.byte	?
+>00e5					PTR_B		.byte	?
+=$e3					PTR			=		PTR_L
+>00e6					CTR_L		.byte	?	; Counter
+>00e7					CTR_H		.byte	?
+>00e8					CTR_B		.byte	?
+>00e9					SA_L		.byte 	?	; Starting address storage
+>00ea					SA_H		.byte 	?
+>00eb					SA_B		.byte	?
+=$e9					SA			=		SA_L
+>00ec					DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
+>00ed					TEMP		.byte 	?
+>00ee					EXTRA		.byte	? 	; Used inside loader.  Please don't use elsewhere
+>00ef					TEMP2		.byte	?
+>00f0					SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
+>00f1					CHART		.byte	?
+>00f2					DEBUG		.byte 	?
+>0400					BUFPTR		.byte	?
+>0401								.byte 	?
+>0402					CMDBUF 		.fill	254					;
+=$6000					STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
+.2000	80 1d		bra $201f	START 			BRA	MONPROMPT			;
+.2002	78		sei					SEI
+.2003	18		clc					CLC
+.2004	fb		xce					XCE					; Native mode
+.2005	e2 20		sep #$20				SEP	#(M_FLAG)			; A,M = 8bit
+.2007	c2 18		rep #$18				REP	#(X_FLAG | D_FLAG)	; 16 bit index, binary math
+.2009	ea		nop					NOP
+.200a	a2 00 60	ldx #$6000				LDX	#STACKTOP
+.200d	9a		txs					TXS
+.200e	a9 00		lda #$00				LDA	#$00
+.2010	48		pha					PHA
+.2011	2b		pld					PLD
+.2012	a2 00 00	ldx #$0000				LDX	#$0000
+.2015	da		phx					PHX
+.2016	2b		pld					PLD
+.2017	22 ed 22 00	jsl $0022ed				JSL	INIT_FIFO
+.201b	22 52 20 00	jsl $002052				JSL	INIT_SER
+.201f	a0 ff 23	ldy #$23ff	MONPROMPT		LDY	#QBFMSG
+.2022	22 45 20 00	jsl $002045				JSL	PUT_STR
+.2026	22 98 20 00	jsl $002098				JSL	GETLINE
+.202a	22 c8 20 00	jsl $0020c8				JSL	PROCESS_LINE
+.202e	80 ef		bra $201f				BRA	MONPROMPT
+.2030	22 4f 23 00	jsl $00234f	ECHO			JSL	GETCHF
+.2034	80 fa		bra $2030				BRA	ECHO
+.2036	22 73 23 00	jsl $002373	BLABBER			JSL	TXCHDLY
+.203a	a9 2a		lda #$2a				LDA	#'*'
+.203c	8d 80 7f	sta $7f80				STA	SDR
+.203f	22 15 23 00	jsl $002315				JSL	PUTCHF
+.2043	80 f1		bra $2036				BRA	BLABBER
+.2045	b9 00 00	lda $0000,y	PUT_STR			LDA	0,Y				; Y points directly to string
+.2048	f0 07		beq $2051				BEQ	PUTSX
+.204a	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.204e	c8		iny					INY						; point to next character
+.204f	80 f4		bra $2045				BRA	PUT_STR
+.2051	6b		rtl		PUTSX:			RTL
+=$1e					SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+=$0b					SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
+.2052	a9 1e		lda #$1e	INIT_SER		LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+.2054	8d 83 7f	sta $7f83				STA 	SCTL
+.2057	a9 0b		lda #$0b				LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+.2059	8d 82 7f	sta $7f82				STA     SCMD
+.205c	6b		rtl					RTL
+.205d	ad 81 7f	lda $7f81	GETSER			LDA	SSR
+.2060	29 08		and #$08				AND	#RX_RDY
+.2062	f0 f9		beq $205d				BEQ	GETSER
+.2064	ad 80 7f	lda $7f80				LDA	SDR
+.2067	18		clc					CLC					; Temporary compatibility return value for blocking/non-blocking
+.2068	6b		rtl					RTL
+.2069	48		pha		PUTSER			PHA
+.206a	8d 80 7f	sta $7f80				STA	SDR
+.206d	22 73 23 00	jsl $002373				JSL	TXCHDLY		; Awful kludge
+.2071	68		pla					PLA
+.2072	18		clc					CLC					; Temporary compatibility return value for integration for blocking/non-blocking
+.2073	6b		rtl					RTL
+.2074	22 0f 23 00	jsl $00230f	PUT_CHR			JSL	MON_PUTC
+.2078	6b		rtl					RTL
+.2079	22 49 23 00	jsl $002349	GET_CHR	   	 	JSL	MON_GETC
+.207d	22 bd 20 00	jsl $0020bd				JSL	TOPUPPER	; Make alphabetics Puppercase
+.2081	85 f1		sta $f1					STA	CHART
+.2083	24 e0		bit $e0					BIT	TERM_FLAGS	; Check for ECHO flag (b7)
+.2085	50 06		bvc $208d				BVC	GCHC1		; Bit 6 = ECHO
+.2087	a5 f1		lda $f1					LDA	CHART
+.2089	22 74 20 00	jsl $002074				JSL	PUT_CHR		; echo on; repeat it back
+.208d	c9 03		cmp #$03	GCHC1			CMP	#CTRL_C
+.208f	d0 04		bne $2095				BNE	GCHC2
+.2091	5c 1f 20 00	jml $00201f				JML	MONPROMPT			; FIXME: FUBAR stack memory leak
+.2095	a5 f1		lda $f1		GCHC2			LDA	CHART
+.2097	6b		rtl					RTL
+.2098	a9 40		lda #$40	GETLINE			LDA	#ECHO_FLAG
+.209a	85 e0		sta $e0					STA	TERM_FLAGS			; Echo back while editing
+.209c	a2 02 04	ldx #$0402				LDX	#CMDBUF
+.209f	22 79 20 00	jsl $002079	GSLP1			JSL	GET_CHR				; With or without echo
+.20a3	c9 0a		cmp #$0a				CMP	#LF
+.20a5	f0 f8		beq $209f				BEQ	GSLP1
+.20a7	c9 08		cmp #$08				CMP	#BS					; We will not tolerate BS here
+.20a9	f0 f4		beq $209f				BEQ	GSLP1
+.20ab	95 00		sta $00,x				STA	0,X					; store it
+.20ad	e8		inx					INX
+.20ae	c9 0d		cmp #$0d				CMP	#CR					;
+.20b0	f0 07		beq $20b9				BEQ	GSXIT1
+.20b2	c9 03		cmp #$03				CMP	#CTRL_C
+.20b4	d0 e9		bne $209f				BNE	GSLP1
+.20b6	a2 03 04	ldx #$0403				LDX	#CMDBUF+1
+.20b9	ca		dex		GSXIT1			DEX							; discard the CR
+.20ba	74 00		stz $00,x	GSXIT2			STZ	0,X					; null-terminate the line
+.20bc	6b		rtl					RTL
+.20bd	c9 61		cmp #$61	TOPUPPER		CMP	#'a'				; Make character PupperCase
+.20bf	90 06		bcc $20c7				BCC	PUPX1				; A < 'a' so can't be lowercase char
+.20c1	c9 7b		cmp #$7b				CMP	#'z'+1
+.20c3	b0 02		bcs $20c7				BCS	PUPX1				; A > 'z', so can't be lowercase char
+.20c5	e9 1f		sbc #$1f				SBC	#'a'-'A'-1			; Adjust upper case to lower case
+.20c7	6b		rtl		PUPX1			RTL
+.20c8					PROCESS_LINE
+.20c8	a9 22		lda #$22				LDA	#'"'
+.20ca	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.20ce	a0 02 04	ldy #$0402				LDY	#CMDBUF
+.20d1	22 45 20 00	jsl $002045				JSL	PUT_STR
+.20d5	a9 22		lda #$22				LDA	#'"'
+.20d7	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.20db	22 0a 21 00	jsl $00210a				JSL	CRLF
+.20df	ad 02 04	lda $0402				LDA	CMDBUF
+.20e2	8d 80 7f	sta $7f80				STA	SDR					; FUBAR - debug of command character
+.20e5	c9 4c		cmp #$4c				CMP	#'L'
+.20e7	d0 0b		bne $20f4				BNE	PLIC2
+.20e9	a0 b8 23	ldy #$23b8				LDY	#MSG_LOADER
+.20ec	22 45 20 00	jsl $002045				JSL	PUT_STR
+.20f0	22 71 21 00	jsl $002171				JSL 	SREC_LOADER
+.20f4	c9 47		cmp #$47	PLIC2			CMP	#'G'
+.20f6	d0 04		bne $20fc				BNE 	PLIC3
+.20f8	22 17 21 00	jsl $002117				JSL	RUNSPOTRUN
+.20fc	c9 4a		cmp #$4a	PLIC3			CMP	#'J'
+.20fe	d0 04		bne $2104				BNE	PLIC9
+.2100	22 17 21 00	jsl $002117				JSL	RUNSPOTRUN
+.2104	c9 03		cmp #$03	PLIC9			CMP	#CTRL_C
+.2106	d0 01		bne $2109				BNE	PLIX1
+.2108	00		brk #					BRK							; return to system monitor
+.2109	6b		rtl		PLIX1			RTL
+.210a	a9 0d		lda #$0d	CRLF			LDA	#CR
+.210c	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2110	a9 0a		lda #$0a				LDA	#LF
+.2112	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2116	6b		rtl					RTL
+.2117	a9 0d		lda #$0d	RUNSPOTRUN		LDA	#CR
+.2119	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.211d	a0 ca 23	ldy #$23ca				LDY	#MSG_6HEX
+.2120	22 45 20 00	jsl $002045				JSL	PUT_STR
+.2124	22 86 22 00	jsl $002286				JSL	GETHEX
+.2128	85 eb		sta $eb					STA	SA_B
+.212a	22 86 22 00	jsl $002286				JSL	GETHEX
+.212e	85 ea		sta $ea					STA	SA_H
+.2130	22 86 22 00	jsl $002286				JSL	GETHEX
+.2134	85 e9		sta $e9					STA	SA_L
+.2136	a0 a3 23	ldy #$23a3				LDY	#MSG_JUMPING
+.2139	22 45 20 00	jsl $002045				JSL	PUT_STR
+.213d	a5 eb		lda $eb					LDA	SA_B
+.213f	22 7f 23 00	jsl $00237f				JSL	PUTHEX
+.2143	a9 3a		lda #$3a				LDA	#':'
+.2145	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2149	a5 ea		lda $ea					LDA	SA_H
+.214b	22 7f 23 00	jsl $00237f				JSL	PUTHEX
+.214f	a5 e9		lda $e9					LDA	SA_L
+.2151	22 7f 23 00	jsl $00237f				JSL	PUTHEX
+.2155	a9 0d		lda #$0d				LDA	#CR
+.2157	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.215b	a0 e6 23	ldy #$23e6				LDY	#MSG_CONFIRM
+.215e	22 45 20 00	jsl $002045				JSL	PUT_STR
+.2162	22 79 20 00	jsl $002079				JSL	GET_CHR
+.2166	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.216a	c9 59		cmp #$59				CMP	#'Y'
+.216c	d0 a9		bne $2117				BNE	RUNSPOTRUN
+.216e	dc eb 00	jmp [$00eb]				JML	[SA_B]
+.2171					SREC_LOADER
+.2171	a9 00		lda #$00				LDA	#0					; No echo
+.2173	85 e0		sta $e0					STA	TERM_FLAGS
+.2175	22 79 20 00	jsl $002079	SYNC	JSL		GET_CHR				; Wait for "S" to start a new record
+.2179	c9 53		cmp #$53				CMP	#'S'
+.217b	d0 f8		bne $2175				BNE	SYNC
+.217d	a9 40		lda #$40				LDA	#'@'
+.217f	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2183	22 79 20 00	jsl $002079				JSL	GET_CHR
+.2187	85 e1		sta $e1					STA	REC_TYPE
+.2189	22 86 22 00	jsl $002286				JSL	GETHEX				; Get message length byte
+.218d	85 ec		sta $ec					STA	DATA_CNT			; Save number of bytes in record
+.218f	a5 e1		lda $e1					LDA	REC_TYPE			; Decode and dispatch
+.2191	f0 2c		beq $21bf				BEQ	GETREMS				; read the comment block
+.2193	c9 31		cmp #$31				CMP	#'1'
+.2195	f0 4d		beq $21e4				BEQ	GET16ADDR
+.2197	c9 32		cmp #$32				CMP	#'2'
+.2199	f0 34		beq $21cf				BEQ	GET24ADDR
+.219b	c9 35		cmp #$35				CMP	#'5'
+.219d	d0 04		bne $21a3				BNE	SLC4
+.219f	5c 1b 22 00	jml $00221b				JML	CNT16
+.21a3	c9 36		cmp #$36	SLC4			CMP	#'6'
+.21a5	d0 04		bne $21ab				BNE	SLC2
+.21a7	5c 25 22 00	jml $002225				JML	CNT24
+.21ab	c9 38		cmp #$38	SLC2			CMP	#'8'
+.21ad	d0 04		bne $21b3				BNE	SLC1
+.21af	5c 51 22 00	jml $002251				JML	SA24		; Too far for relative branch
+.21b3	c9 39		cmp #$39	SLC1			CMP	#'9'
+.21b5	d0 04		bne $21bb				BNE	SLC3
+.21b7	5c 47 22 00	jml $002247				JML	SA16
+.21bb	5c 75 21 00	jml $002175	SLC3			JML	SYNC
+.21bf	a9 30		lda #$30	GETREMS			LDA	#'0'
+.21c1	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.21c5	a9 23		lda #$23				LDA	#'#'
+.21c7	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.21cb	5c 75 21 00	jml $002175				JML	SYNC
+.21cf					GET24ADDR
+.21cf	a9 32		lda #$32				LDA	#'2'
+.21d1	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.21d5	a5 ec		lda $ec					LDA	DATA_CNT
+.21d7	38		sec					SEC
+.21d8	e9 04		sbc #$04				SBC	#4			; Data length -= 3 bytes address + 1 byte checksum
+.21da	85 ec		sta $ec					STA	DATA_CNT	; Adjust data count to include only payload data bytes
+.21dc	22 86 22 00	jsl $002286				JSL	GETHEX
+.21e0	85 e5		sta $e5					STA	PTR_B
+.21e2	80 0f		bra $21f3				BRA	GET1624
+.21e4	a9 31		lda #$31	GET16ADDR		LDA	#'1'
+.21e6	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.21ea	a5 ec		lda $ec					LDA	DATA_CNT
+.21ec	38		sec					SEC
+.21ed	e9 03		sbc #$03				SBC	#3			; Data length -= 2 bytes address + 1 byte checksum
+.21ef	85 ec		sta $ec					STA	DATA_CNT	; Adjust data count to include only payload data bytes
+.21f1	64 e5		stz $e5					STZ	PTR_B		; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
+.21f3	22 86 22 00	jsl $002286	GET1624			JSL	GETHEX		; Got bank value (or set to 0). Now get high and low address
+.21f7	85 e4		sta $e4					STA	PTR_H
+.21f9	22 86 22 00	jsl $002286				JSL	GETHEX
+.21fd	85 e3		sta $e3					STA	PTR_L
+.21ff	a5 ec		lda $ec		SAVDAT:			LDA	DATA_CNT	; A record can have 0 data bytes, theoretically. So check at top
+.2201	f0 0e		beq $2211				BEQ	SAVDX1		; No more data to PROCESS_LINE
+.2203	22 86 22 00	jsl $002286	SAVDAT2			JSL	GETHEX
+.2207	87 e3		sta [$e3]				STA	[PTR]		; 24 bit indirect save
+.2209	22 7b 22 00	jsl $00227b				JSL	INC_PTR		; Point to next byte
+.220d	c6 ec		dec $ec					DEC	DATA_CNT
+.220f	d0 f2		bne $2203				BNE	SAVDAT2
+.2211	a9 23		lda #$23	SAVDX1			LDA	#'#'
+.2213	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2217	5c 75 21 00	jml $002175				JML	SYNC		; FIXME: parse the checksum and end of line
+.221b	a9 35		lda #$35	CNT16			LDA	#'5'
+.221d	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2221	64 e8		stz $e8					STZ	CTR_B
+.2223	80 0c		bra $2231				BRA	CN16C1
+.2225	a9 36		lda #$36	CNT24:			LDA	#'6'
+.2227	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.222b	22 86 22 00	jsl $002286				JSL	GETHEX
+.222f	85 e8		sta $e8					STA	CTR_B
+.2231	22 86 22 00	jsl $002286	CN16C1			JSL	GETHEX		; bits 15-8
+.2235	85 e7		sta $e7					STA	CTR_H
+.2237	22 86 22 00	jsl $002286				JSL	GETHEX		; bits 7-0
+.223b	85 e6		sta $e6					STA	CTR_L
+.223d	a9 23		lda #$23				LDA	#'#'
+.223f	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2243	5c 75 21 00	jml $002175				JML	SYNC		; FIXME: parse the rest of the record & end of line
+.2247	a9 39		lda #$39	SA16			LDA	#'9'
+.2249	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.224d	64 eb		stz $eb					STZ	SA_B
+.224f	80 0c		bra $225d				BRA	SA16C1
+.2251	a9 38		lda #$38	SA24			LDA	#'8'
+.2253	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2257	22 86 22 00	jsl $002286				JSL	GETHEX		; length byte
+.225b	64 eb		stz $eb					STZ	SA_B
+.225d	22 86 22 00	jsl $002286	SA16C1			JSL	GETHEX		; bits 15-8
+.2261	85 ea		sta $ea					STA	SA_H
+.2263	22 86 22 00	jsl $002286				JSL	GETHEX		; bits 7-0
+.2267	85 e9		sta $e9					STA	SA_L
+.2269	a9 26		lda #$26				LDA	#'&'
+.226b	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.226f	22 79 20 00	jsl $002079	GOEOL			JSL	GET_CHR
+.2273	c9 0d		cmp #$0d				CMP	#CR
+.2275	d0 f8		bne $226f				BNE	GOEOL
+.2277	5c 1f 20 00	jml $00201f				JML	MONPROMPT
+.227b	e6 e3		inc $e3		INC_PTR			INC	PTR_L		; point to the next byte to save to
+.227d	d0 06		bne $2285				BNE	INCPX1
+.227f	e6 e4		inc $e4					INC	PTR_H
+.2281	d0 02		bne $2285				BNE	INCPX1
+.2283	e6 e5		inc $e5					INC	PTR_B
+.2285	6b		rtl		INCPX1			RTL
+.2286	22 79 20 00	jsl $002079	GETHEX  		JSL 	GET_CHR
+.228a	c9 03		cmp #$03				CMP	#CTRL_C
+.228c	d0 10		bne $229e				BNE	GHECC1
+.228e	a9 5e		lda #$5e				LDA	#'^'
+.2290	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.2294	a9 43		lda #$43				LDA	#'C'
+.2296	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.229a	5c 1f 20 00	jml $00201f	        		JML	MONPROMPT
+.229e	22 98 23 00	jsl $002398	GHECC1			JSL     MKNIBL  	; Convert to 0..F numeric
+.22a2	0a		asl a		        		ASL     A
+.22a3	0a		asl a		        		ASL     A
+.22a4	0a		asl a		        		ASL     A
+.22a5	0a		asl a		        		ASL     A       	; This is the upper nibble
+.22a6	29 f0		and #$f0	        		AND     #$F0
+.22a8	85 f0		sta $f0		        		STA     SUBTEMP
+.22aa	22 79 20 00	jsl $002079	        		JSL     GET_CHR
+.22ae	c9 03		cmp #$03				CMP	#CTRL_C
+.22b0	d0 10		bne $22c2				BNE	GHECC2
+.22b2	a9 5e		lda #$5e				LDA	#'^'
+.22b4	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.22b8	a9 43		lda #$43				LDA	#'C'
+.22ba	22 74 20 00	jsl $002074				JSL	PUT_CHR
+.22be	5c 1f 20 00	jml $00201f				JML	MONPROMPT
+.22c2	22 98 23 00	jsl $002398	GHECC2			JSL     MKNIBL
+.22c6	05 f0		ora $f0		        		ORA    	SUBTEMP
+.22c8	6b		rtl		        		RTL
+=$01					FIFO_TXE = PB0
+=$02					FIFO_RXF = PB1
+=$04					FIFO_WR = PB2
+=$08					FIFO_RD = PB3
+=$20					FIFO_PWREN = PB5
+=$80					FIFO_DEBUG = PB7		; Handy debug toggle output free for any use
+.22c9	a9 ff		lda #$ff	SEL_BANK3		LDA	#%11111111
+.22cb	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
+.22ce	6b		rtl					RTL
+.22cf	a9 fd		lda #$fd	SEL_BANK2		LDA	#%11111101
+.22d1	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
+.22d4	6b		rtl					RTL
+.22d5	a9 df		lda #$df	SEL_BANK1		LDA	#%11011111
+.22d7	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
+.22da	6b		rtl					RTL
+.22db					SEL_BANK0
+.22db	a9 dd		lda #$dd				LDA	#%11011101
+.22dd	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
+.22e0	6b		rtl					RTL
+.22e1	a9 ff		lda #$ff	INIT_SYSVIA		LDA	#%11111111
+.22e3	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
+.22e6	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA
+.22e9	9c e2 7f	stz $7fe2				STZ	SYSTEM_VIA_DDRB
+.22ec	6b		rtl					RTL
+.22ed	a9 ff		lda #$ff	INIT_FIFO		LDA	#$FF
+.22ef	8d ec 7f	sta $7fec				STA     SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
+.22f2	9c eb 7f	stz $7feb				STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+.22f5	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
+.22f8	9c e2 7f	stz $7fe2				STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
+.22fb	a9 08		lda #$08				LDA	#FIFO_RD				;
+.22fd	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
+.2300	a9 8c		lda #$8c				LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
+.2302	8d e2 7f	sta $7fe2				STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
+.2305	6b		rtl					RTL								; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
+.2306	ea		nop		FIFOPWR	NOP								; FIXME: Defensive and possibly unnecessary
+.2307	ad e0 7f	lda $7fe0				LDA	SYSTEM_VIA_IORB
+.230a	29 20		and #$20				AND	#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+.230c	d0 f8		bne $2306				BNE	FIFOPWR
+.230e	6b		rtl					RTL
+.230f					MON_PUTC
+.230f	22 4b e0 00	jsl $00e04b				JSL 	PUT_CHAR_265			; Temporarily use 265 eval board for I/O
+.2313	18		clc					CLC
+.2314	6b		rtl					RTL
+.2315	85 ef		sta $ef		PUTCHF			STA	TEMP2
+.2317	ad e0 7f	lda $7fe0				LDA	SYSTEM_VIA_IORB				; Read in FIFO status Port for FIFO
+.231a	29 01		and #$01				AND	#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+.231c	38		sec					SEC						; FIFO is full, so don't try to queue it!
+.231d	d0 27		bne $2346				BNE	OFX1					; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+.231f	9c e3 7f	stz $7fe3	OFCONT	STZ		SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating
+.2322	a9 8c		lda #$8c				LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
+.2324	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
+.2327	a5 ef		lda $ef					LDA	TEMP2					; Restore the data to send
+.2329	8d e1 7f	sta $7fe1				STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet)
+.232c	a9 ff		lda #$ff				LDA	#$FF					; make Port A all outputs with stable output value already set in prior lines
+.232e	8d e3 7f	sta $7fe3				STA	SYSTEM_VIA_DDRA			; Save data to output latches
+.2331	ea		nop					NOP								; Some settling time of data output just to be safe
+.2332	ea		nop					NOP
+.2333	ea		nop					NOP
+.2334	ea		nop					NOP
+.2335	ea		nop					NOP
+.2336	ea		nop					NOP
+.2337	a9 08		lda #$08				LDA	#(FIFO_RD)			; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
+.2339	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
+.233c	ea		nop					NOP	; Hold time following write strobe, to ensure value is latched OK
+.233d	ea		nop					NOP
+.233e	ea		nop					NOP
+.233f	ea		nop					NOP
+.2340	ea		nop					NOP
+.2341	ea		nop					NOP
+.2342	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA		; Make port A an input again
+.2345	18		clc					CLC				; signal success of write to caller
+.2346	a5 ef		lda $ef		OFX1			LDA	TEMP2
+.2348	6b		rtl					RTL
+.2349					MON_GETC
+.2349	22 36 e0 00	jsl $00e036				JSL	GET_CHAR_265
+.234d	18		clc					CLC
+.234e	6b		rtl					RTL
+.234f					GETCHF
+.234f	ad e0 7f	lda $7fe0				LDA	SYSTEM_VIA_IORB		; Check RXF flag
+.2352	29 02		and #$02				AND	#FIFO_RXF			; If clear, we're OK to read.  If set, there's no data waiting
+.2354	38		sec					SEC
+.2355	d0 1b		bne $2372				BNE 	INFXIT				; If RXF is 1, then no character is waiting!
+.2357	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
+.235a	a9 08		lda #$08				LDA	#FIFO_RD
+.235c	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+.235f	ea		nop					NOP
+.2360	9c e0 7f	stz $7fe0				STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A
+.2363	ea		nop					NOP
+.2364	ea		nop					NOP
+.2365	ea		nop					NOP
+.2366	ea		nop					NOP
+.2367	ad e1 7f	lda $7fe1				LDA	SYSTEM_VIA_IORA		; read data in
+.236a	48		pha					PHA
+.236b	a9 08		lda #$08				LDA	#FIFO_RD		; Restore back to inactive signals RD=1 and WR=0
+.236d	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB
+.2370	68		pla					PLA
+.2371	18		clc					CLC				; we got a byte!
+.2372	6b		rtl		INFXIT			RTL
+=$0940					TX_DLY_CYCLES = $0940			; Not tuned.  As it's temporary, optimum settings are unimportant.
+.2373	5a		phy		TXCHDLY			PHY
+.2374	a0 40 09	ldy #$0940				LDY	#TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
+.2377	88		dey		DLY_Y			DEY
+.2378	ea		nop					NOP
+.2379	ea		nop					NOP
+.237a	ea		nop					NOP
+.237b	d0 fa		bne $2377				BNE	DLY_Y
+.237d	7a		ply					PLY
+.237e	6b		rtl					RTL
+.237f	48		pha		PUTHEX  		PHA
+.2380	4a		lsr a		        		LSR 	A
+.2381	4a		lsr a		        		LSR 	A
+.2382	4a		lsr a					LSR 	A
+.2383	4a		lsr a					LSR 	A
+.2384	22 89 23 00	jsl $002389	        		JSL     PRNIBL
+.2388	68		pla		        		PLA
+.2389	29 0f		and #$0f	PRNIBL  		AND     #$0F    	; strip off the low nibble
+.238b	c9 0a		cmp #$0a	        		CMP     #$0A
+.238d	90 02		bcc $2391	        		BCC  	NOTHEX  	; if it's 0-9, add '0' else also add 7
+.238f	69 06		adc #$06	        		ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
+.2391	69 30		adc #$30	NOTHEX  		ADC     #'0'    	; If carry clear, we're 0-9
+.2393	22 74 20 00	jsl $002074	PUTCH			JSL	PUT_CHR
+.2397	6b		rtl					RTL
+.2398	c9 3a		cmp #$3a	MKNIBL  		CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
+.239a	90 02		bcc $239e	        		BCC     MKNNH   	; If we borrowed, we lost the carry so 0..9
+.239c	e9 08		sbc #$08	        		SBC     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
+.239e	e9 2f		sbc #$2f	MKNNH   		SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
+.23a0	29 0f		and #$0f	        		AND     #$0F    	; no upper nibble no matter what
+.23a2	6b		rtl		        		RTL             	; and return the nibble
+.23a3					MSG_JUMPING:
+>23a3	0d 4a 75 6d 70 69 6e 67			.text	CR,"Jumping to address:",0
+>23ab	20 74 6f 20 61 64 64 72 65 73 73 3a 00
+.23b8					MSG_LOADER
+>23b8	0d 4c 6f 61 64 65 72 20			.text	CR,"Loader started!",CR
+>23c0	73 74 61 72 74 65 64 21 0d
+>23c9	00					.text 	0
+.23ca					MSG_6HEX
+>23ca	0d 45 6e 74 65 72 20 36			.text	CR,"Enter 6 digit hex address:",0
+>23d2	20 64 69 67 69 74 20 68 65 78 20 61 64 64 72 65
+>23e2	73 73 3a 00
+.23e6					MSG_CONFIRM
+>23e6	0d 49 73 20 74 68 69 73			.text	CR,"Is this correct (Y/x)?:",0
+>23ee	20 63 6f 72 72 65 63 74 20 28 59 2f 78 29 3f 3a
+>23fe	00
+>23ff	0d 0d				QBFMSG	.text 		CR,CR
+>2401	20 20 20 20 20 20 20 20			.text	"                  VCBmon v 1.00",CR
+>2409	20 20 20 20 20 20 20 20 20 20 56 43 42 6d 6f 6e
+>2419	20 76 20 31 2e 30 30 0d
+>2421	20 20 20 20 20 20 20 20			.text 	"          ******************************",CR
+>2429	20 20 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2439	2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2449	0d
+>244a	20 20 20 20 20 20 20 20			.text 	"          *                            *",CR
+>2452	20 20 2a 20 20 20 20 20 20 20 20 20 20 20 20 20
+>2462	20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 2a
+>2472	0d
+>2473	20 20 20 20 20 20 20 20			.text 	"          *    The Quick brown Dog     *",CR
+>247b	20 20 2a 20 20 20 20 54 68 65 20 51 75 69 63 6b
+>248b	20 62 72 6f 77 6e 20 44 6f 67 20 20 20 20 20 2a
+>249b	0d
+>249c	20 20 20 20 20 20 20 20			.text 	"          *  Jumps over the Lazy Fox!  *",CR
+>24a4	20 20 2a 20 20 4a 75 6d 70 73 20 6f 76 65 72 20
+>24b4	74 68 65 20 4c 61 7a 79 20 46 6f 78 21 20 20 2a
+>24c4	0d
+>24c5	20 20 20 20 20 20 20 20			.text 	"          *                            *",CR
+>24cd	20 20 2a 20 20 20 20 20 20 20 20 20 20 20 20 20
+>24dd	20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 2a
+>24ed	0d
+>24ee	20 20 20 20 20 20 20 20			.text 	"          ******************************",CR
+>24f6	20 20 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2506	2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a 2a
+>2516	0d
+.2517					 PROMPT
+>2517	0d					.text	CR
+>2518	20 20 20 20 20 20 20 20			.text	"        _,-=._              /|_/|",CR
+>2520	5f 2c 2d 3d 2e 5f 20 20 20 20 20 20 20 20 20 20
+>2530	20 20 20 20 2f 7c 5f 2f 7c 0d
+>253a	20 20 20 20 20 20 20 2a		 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR
+>2542	2d 2e 7d 20 20 20 60 3d 2e 5f 2c 2e 2d 3d 2d 2e
+>2552	5f 2e 2c 20 20 40 20 40 2e 5f 2c 0d
+>255e	20 20 20 20 20 20 20 20		 	.text   "          `._ _,-.   )      _,.-'",CR
+>2566	20 20 60 2e 5f 20 5f 2c 2d 2e 20 20 20 29 20 20
+>2576	20 20 20 20 5f 2c 2e 2d 27 0d
+>2580	20 20 20 20 20 20 20 20		        .text   "             `    G.m-'^m'm'",CR
+>2588	20 20 20 20 20 60 20 20 20 20 47 2e 6d 2d 27 5e
+>2598	6d 27 6d 27 0d
+>259d	3e					.text   ">"
+>259e	00				    .text	0
+>259f	0a 0a				ANYKEY:	.text	LF,LF
+>25a1	50 72 65 73 73 20 74 68			.text 	"Press the ANY key (CTRL-C) to return to monitor",CR
+>25a9	65 20 41 4e 59 20 6b 65 79 20 28 43 54 52 4c 2d
+>25b9	43 29 20 74 6f 20 72 65 74 75 72 6e 20 74 6f 20
+>25c9	6d 6f 6e 69 74 6f 72 0d
+>25d1	65 6c 73 65 20 63 6f 6e			.text   "else continue foxing:"
+>25d9	74 69 6e 75 65 20 66 6f 78 69 6e 67 3a
+>25e6	00					.text	0
+>ffe4	00 20				NCOP	.word		START		; COP exception in native mode
+>ffe6	00 20				NBRK	.word		START		; BRK in native mode
+>ffe8	00 20				NABORT	.word		START
+>ffea	00 20				NNMI	.word		START		; NMI interrupt in native mode
+>ffee	00 20				NIRQ	.word		START
+>fff4	00 20				ECOP	.word		START		; COP exception in 65c02 emulation mode
+>fff8	00 20				EABORT	.word		START
+>fffa	00 20				ENMI	.word		START		; NMI interrupt in 65c02 emulation mode
+>fffc	00 20				ERESET	.word		START		; RESET exception in all modes
+>fffe	00 20				EIRQ	.word		START
+
+;******  End of listing
