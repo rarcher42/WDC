@@ -140,8 +140,9 @@ DEBUG		.byte 	?
 
 
 * = $0400			; Command buffer area
-CMDCNT		.byte	?
-CMDBUF 		.fill	255					;	 
+CMDBUF 		.fill	256					;	
+CMDCNT		.word	?
+ 
 
 STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
@@ -205,13 +206,13 @@ GETCHAR	    JSL		GET_RAW
 			JSL		TOPUPPER	; Make alphabetics Puppercase
 			RTL
 
-CLRCMD		STZ		CMDCNT		; Set count to 0
+CLRCMD		LDX		#0
+			STX		CMDCNT
 			STZ		CMDBUF		; Null terminate the empty buffer
 			RTL
 			
 GETLINE		JSL		CLRCMD
-			LDX		#CMDBUF	
-GLLP1		JSL		GETCHAR				; With or without echo
+GLLP1		JSL		GETCHAR				; Do not echo
 			CMP		#CR
 			BNE		GLNC0
 			JSL		PUTCHAR
@@ -234,20 +235,21 @@ GLNC1		CMP		#LF
 GLNC2		CMP		#BS					; We will not tolerate BS here
 			BNE		GLNC9
 			; Handle backspace
-			STZ		0,X					; Character we backed over is now end of string
+			STZ		CMDBUF,X
+			CPX		#0
+			BEQ		GLLP1				; Already backed over the first character. No index to decrement
 			JSL		PUTCHAR
-			LDA		CMDCNT
-			BEQ		GLLP1				; Nothing to delete
 			DEX							; change buffer pointer
-			DEC		CMDCNT
+			STX		CMDCNT
+			STZ		CMDBUF,X			; Character we backed over is now end of string
 			BRA		GLLP1
 			; enough of BS
-GLNC9		STA		0,X					; store it
+GLNC9		STA		CMDBUF,X					; store it
 			JSL		PUTCHAR
 			INC		CMDCNT
 			INX
 			BRA		GLLP1
-GLXIT1		STZ		0,X					; null-terminate the line
+GLXIT1		STZ		CMDBUF,X				; null-terminate the line
 			RTL
 			
 TOPUPPER	CMP		#'a'				; Make character PupperCase
