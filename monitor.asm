@@ -4,13 +4,15 @@
 ; 
 ;
 ; Monitor hooks
-GET_CHAR_265	=	$E036
-PUT_CHAR_265	= 	$E04B
-CTRL_C	= 3
-BS		= 8
-LF		= 10
-CR		= 13
-SP		= 32
+RAW_GETC	=	$E036
+RAW_PUTC	= 	$E04B
+
+CTRL_C	= $03
+BS		= $08
+LF		= $0A
+CR		= $0D
+SP		= $20
+DEL     = $7F
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -110,9 +112,7 @@ ALL_OUTPUTS = $FF
 
 ; Direct page fun
 *=$E0
-TERM_FLAGS	.byte	?					; Pick somewhere not used by WDCmon
-	ECHO_FLAG	= MASK6						; Use bit 6 so BIT can be used
-	
+
 REC_TYPE	.byte 	?
 DP_START	.byte	?
 PTR_L		.byte	?	; Generic pointer
@@ -140,13 +140,12 @@ DEBUG		.byte 	?
 
 
 * = $0400			; Command buffer area
-BUFPTR		.byte	?
-			.byte 	?
-CMDBUF 		.fill	254					;	 
+CMDCNT		.byte	?
+CMDBUF 		.fill	255					;	 
 
 STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
-START 		BRA		MONPROMPT			;
+START 		BRA		MONBAN		;
 			; 816 board initialization.  Skip while developing monitor on 265 board
 			SEI
 			CLC	
@@ -168,8 +167,12 @@ START 		BRA		MONPROMPT			;
 			JSL		INIT_FIFO
 			JSL		INIT_SER
 			;
-MONPROMPT	LDY		#QBFMSG
+MONBAN		LDY		#QBFMSG
 			JSL		PUT_STR
+MONPROMPT	LDA		#CR
+			JSL		PUTCHAR
+			LDA		#'>'
+			JSL		PUTCHAR
 			JSL		GETLINE
 			JSL		PROCESS_LINE
 			BRA		MONPROMPT
@@ -182,14 +185,80 @@ BLABBER		JSL		TXCHDLY
 			STA		SDR
 			JSL		PUTCHF
 			BRA		BLABBER
-					
-				
+	
+; MUST JSL not JSR here	
+PUTCHAR		; Translations (if any) go here
+PUT_RAW		JSL		RAW_PUTC
+			RTL
+
 PUT_STR		LDA		0,Y				; Y points directly to string
 			BEQ		PUTSX
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			INY						; point to next character
 			BRA		PUT_STR		
-PUTSX:		RTL		
+PUTSX:		RTL	
+			
+GET_RAW		JSL		RAW_GETC
+			RTL
+			
+GETCHAR	    JSL		GET_RAW
+			JSL		TOPUPPER	; Make alphabetics Puppercase
+			RTL
+
+CLRCMD		STZ		CMDCNT		; Set count to 0
+			STZ		CMDBUF		; Null terminate the empty buffer
+			RTL
+			
+GETLINE		JSL		CLRCMD
+			LDX		#CMDBUF	
+GLLP1		JSL		GETCHAR				; With or without echo
+			CMP		#CR
+			BNE		GLNC0
+			JSL		PUTCHAR
+			BRA		GLXIT1				; end of message
+GLNC0		CMP		#CTRL_C
+			BNE		GLNC1
+			; CTRL-C handler
+			LDA		#'^'
+			JSL		PUTCHAR
+			LDA		#'C'
+			JSL		PUTCHAR
+			JSL		CLRCMD				; zotch out any command in buffer
+			BRA		GLXIT1
+			; CTRL-C
+GLNC1		CMP		#LF
+			BNE		GLNC2
+			; LF handler
+			BRA		GLLP1
+			; LF
+GLNC2		CMP		#BS					; We will not tolerate BS here
+			BNE		GLNC9
+			; Handle backspace
+			STZ		0,X					; Character we backed over is now end of string
+			JSL		PUTCHAR
+			LDA		CMDCNT
+			BEQ		GLLP1				; Nothing to delete
+			DEX							; change buffer pointer
+			DEC		CMDCNT
+			BRA		GLLP1
+			; enough of BS
+GLNC9		STA		0,X					; store it
+			JSL		PUTCHAR
+			INC		CMDCNT
+			INX
+			BRA		GLLP1
+GLXIT1		STZ		0,X					; null-terminate the line
+			RTL
+			
+TOPUPPER	CMP		#'a'				; Make character PupperCase
+			BCC		PUPX1				; A < 'a' so can't be lowercase char
+			CMP		#'z'+1				
+			BCS		PUPX1				; A > 'z', so can't be lowercase char	
+			; Note - carry is clear so we subtract one less
+			SBC		#'a'-'A'-1			; Adjust upper case to lower case		
+PUPX1		RTL		
+				
+	
 	
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
@@ -223,58 +292,17 @@ PUTSER		PHA
 			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
 			RTL
 		
-; Raw I/O wrappers to simplify changing I/O ports.  Probably temporary
-PUT_CHR		JSL		MON_PUTC
-			RTL
-			
-GET_CHR	    JSL		MON_GETC
-			JSL		TOPUPPER	; Make alphabetics Puppercase
-			STA		CHART
-			BIT		TERM_FLAGS	; Check for ECHO flag (b7)
-			BVC		GCHC1		; Bit 6 = ECHO
-			LDA		CHART
-			JSL		PUT_CHR		; echo on; repeat it back
-GCHC1		CMP		#CTRL_C
-			BNE		GCHC2
-			JML		MONPROMPT			; FIXME: FUBAR stack memory leak
-GCHC2		LDA		CHART
-			RTL
-GETLINE		LDA		#ECHO_FLAG		
-			STA		TERM_FLAGS			; Echo back while editing
-			LDX		#CMDBUF	
-GSLP1		JSL		GET_CHR				; With or without echo
-			CMP		#LF
-			BEQ		GSLP1
-			CMP		#BS					; We will not tolerate BS here
-			BEQ		GSLP1
-			STA		0,X					; store it	
-			INX
-			CMP		#CR					;
-			BEQ		GSXIT1
-			CMP		#CTRL_C
-			BNE		GSLP1
-			LDX		#CMDBUF+1
-GSXIT1		DEX							; discard the CR
-GSXIT2		STZ		0,X					; null-terminate the line
-			RTL
-			
-TOPUPPER	CMP		#'a'				; Make character PupperCase
-			BCC		PUPX1				; A < 'a' so can't be lowercase char
-			CMP		#'z'+1				
-			BCS		PUPX1				; A > 'z', so can't be lowercase char	
-			; Note - carry is clear so we subtract one less
-			SBC		#'a'-'A'-1			; Adjust upper case to lower case		
-PUPX1		RTL		
+				
 			
 
 ; ==============================================================================================================================
 PROCESS_LINE	
 			LDA		#'"'
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			LDY		#CMDBUF
 			JSL		PUT_STR
 			LDA		#'"'
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			JSL		CRLF
 			LDA		CMDBUF
 			STA		SDR					; FUBAR - debug of command character
@@ -295,13 +323,13 @@ PLIC9		CMP		#CTRL_C
 PLIX1		RTL
 
 CRLF		LDA		#CR
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			LDA		#LF
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			RTL
 			
 RUNSPOTRUN	LDA		#CR
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			LDY		#MSG_6HEX
 			JSL		PUT_STR
 			JSL		GETHEX
@@ -315,17 +343,17 @@ RUNSPOTRUN	LDA		#CR
 			LDA		SA_B
 			JSL		PUTHEX
 			LDA		#':'
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			LDA		SA_H
 			JSL		PUTHEX
 			LDA		SA_L
 			JSL		PUTHEX
 			LDA		#CR
-			JSL		PUT_CHR
+			JSL		PUTCHAR
 			LDY		#MSG_CONFIRM
 			JSL		PUT_STR
-			JSL		GET_CHR
-			JSL		PUT_CHR
+			JSL		GETCHAR
+			JSL		PUTCHAR
 			CMP		#'Y'
 			BNE		RUNSPOTRUN
 			JML		[SA_B]
@@ -344,15 +372,13 @@ RUNSPOTRUN	LDA		#CR
 ; FIXME: This is a hyper-minimal loader, in fine board bring up tradition.
 ; Will probably use this loader to develop a much better loader :D
 SREC_LOADER	
-		LDA		#0					; No echo
-		STA		TERM_FLAGS
-SYNC	JSL		GET_CHR				; Wait for "S" to start a new record
+SYNC	JSL		GETCHAR				; Wait for "S" to start a new record
 		CMP		#'S'
 		BNE		SYNC
 		LDA		#'@'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		; Optimistically assume start of record.
-		JSL		GET_CHR
+		JSL		GETCHAR
 		STA		REC_TYPE										
 		JSL		GETHEX				; Get message length byte
 		STA		DATA_CNT			; Save number of bytes in record
@@ -378,13 +404,13 @@ SLC1	CMP		#'9'
 SLC3	JML		SYNC
 
 GETREMS	LDA		#'0'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		LDA		#'#'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JML		SYNC
 GET24ADDR
 		LDA		#'2'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#4			; Data length -= 3 bytes address + 1 byte checksum 
@@ -394,7 +420,7 @@ GET24ADDR
 		BRA		GET1624
 GET16ADDR
 		LDA		#'1'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#3			; Data length -= 2 bytes address + 1 byte checksum 
@@ -414,16 +440,16 @@ SAVDAT2	JSL		GETHEX
 		DEC		DATA_CNT
 		BNE		SAVDAT2
 SAVDX1	LDA		#'#'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JML		SYNC		; FIXME: parse the checksum and end of line
 		
 ; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
 CNT16	LDA		#'5'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		STZ		CTR_B
 		BRA		CN16C1
 CNT24:	LDA		#'6'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JSL		GETHEX
 		STA		CTR_B
 CN16C1	JSL		GETHEX		; bits 15-8
@@ -431,16 +457,16 @@ CN16C1	JSL		GETHEX		; bits 15-8
 		JSL		GETHEX		; bits 7-0
 		STA		CTR_L
 		LDA		#'#'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JML		SYNC		; FIXME: parse the rest of the record & end of line
 
 ; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
 SA16	LDA		#'9'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		STZ		SA_B
 		BRA		SA16C1
 SA24	LDA		#'8'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JSL		GETHEX		; length byte
 		STZ		SA_B
 SA16C1	JSL		GETHEX		; bits 15-8
@@ -448,8 +474,8 @@ SA16C1	JSL		GETHEX		; bits 15-8
 		JSL		GETHEX		; bits 7-0
 		STA		SA_L
 		LDA		#'&'
-		JSL		PUT_CHR
-GOEOL	JSL		GET_CHR
+		JSL		PUTCHAR
+GOEOL	JSL		GETCHAR
 		CMP		#CR
 		BNE		GOEOL
 		JML		MONPROMPT
@@ -463,13 +489,13 @@ INC_PTR	INC		PTR_L		; point to the next byte to save to
 INCPX1	RTL
 
 ; Basic conversions	
-GETHEX  JSL 	GET_CHR
+GETHEX  JSL 	GETCHAR
 		CMP		#CTRL_C
 		BNE		GHECC1
 		LDA		#'^'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		LDA		#'C'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
         JML		MONPROMPT
 GHECC1	JSL     MKNIBL  	; Convert to 0..F numeric
         ASL     A
@@ -478,13 +504,13 @@ GHECC1	JSL     MKNIBL  	; Convert to 0..F numeric
         ASL     A       	; This is the upper nibble
         AND     #$F0
         STA     SUBTEMP
-        JSL     GET_CHR
+        JSL     GETCHAR
 		CMP		#CTRL_C
 		BNE		GHECC2
 		LDA		#'^'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		LDA		#'C'
-		JSL		PUT_CHR
+		JSL		PUTCHAR
 		JML		MONPROMPT
 GHECC2	JSL     MKNIBL
         ORA    	SUBTEMP
@@ -580,15 +606,6 @@ FIFOPWR	NOP								; FIXME: Defensive and possibly unnecessary
 		BNE		FIFOPWR	
 		RTL
 
-; Attempt to output the byte in A.
-; If successful, the carry flag will be Clear (C=0) 
-; If the FIFO is full, it will return immediately with the carry set (C=1)
-; Caller is responsible for checking the carry flag with BCC or BCS 
-; and re-trying if carry is clear.
-MON_PUTC
-		JSL 	PUT_CHAR_265			; Temporarily use 265 eval board for I/O
-		CLC
-		RTL
 		
 PUTCHF	STA		TEMP2
 		LDA		SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
@@ -624,11 +641,6 @@ OFX1	LDA		TEMP2
 		RTL
 ;
 ;
-	
-MON_GETC
-		JSL		GET_CHAR_265
-		CLC
-		RTL
 		
 ; On exit:
 ; If Carry flag is clear, A contains the next byte from the FIFO
@@ -691,7 +703,7 @@ PRNIBL  	AND     #$0F    	; strip off the low nibble
         	ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
 NOTHEX  	ADC     #'0'    	; If carry clear, we're 0-9
 ; Write the character in A as ASCII:
-PUTCH		JSL		PUT_CHR
+PUTCH		JSL		PUTCHAR
 			RTL
 
         ; 
@@ -730,8 +742,7 @@ QBFMSG	.text 		CR,CR
 	.text	"        _,-=._              /|_/|",CR
  	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR
  	.text   "          `._ _,-.   )      _,.-'",CR
-        .text   "             `    G.m-'^m'm'",CR
-	.text   ">"
+        .text   "             `    G.m-'^m'm'",CR,CR
     .text	0
 	
 ANYKEY:	.text	LF,LF
