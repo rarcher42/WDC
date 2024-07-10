@@ -2,7 +2,6 @@
 ; Assembled with 64TASS
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
-;
 ; Monitor hooks
 RAW_GETC	=	$E036
 RAW_PUTC	= 	$E04B
@@ -111,6 +110,11 @@ ALL_OUTPUTS = $FF
         .xl     			; X, Y = 16 bits
 
 ; Direct page fun
+TERMFLAGS = $43
+RDRDY	= $01				; 1 = character waiting
+XONXOFF = $04				; 0 = hardware handshake 1= XON/XOFF
+ECHOOFF = $20
+
 *=$E0
 
 REC_TYPE	.byte 	?
@@ -188,22 +192,53 @@ BLABBER		JSL		TXCHDLY
 			BRA		BLABBER
 	
 ; MUST JSL not JSR here	
-PUTCHAR		; Translations (if any) go here
+PUTCHARTR	CMP		#$20
+			BCS		PUT_RAW
+			PHA					; Display as hex value
+			LDA		#'\'
+			JSL		PUT_RAW
+			PLA
+			JSL		PUTHEX
+PUTCRX1		RTL
+			
+PUTCHAR		
 PUT_RAW		JSL		RAW_PUTC
 			RTL
 
 PUT_STR		LDA		0,Y				; Y points directly to string
 			BEQ		PUTSX
-			JSL		PUTCHAR
+			JSL		PUT_RAW
 			INY						; point to next character
 			BRA		PUT_STR		
-PUTSX:		RTL	
-			
+PUTSX		RTL	
+
+; Show control characters as printable
+PUT_STR_CTRL 
+			LDA		0,Y				; Y points directly to string
+			BEQ		PUTSRX
+			JSL		PUTCHARTR		; Show control characters, etc.
+			INY						; point to next character
+			BRA		PUT_STR_CTRL
+PUTSRX		RTL	
+
 GET_RAW		JSL		RAW_GETC
+GRXIT1		RTL
+
+
+;	6608 00:FC0C A5 43 LDA SFLAG3 ;GET SERIAL BYTE
+;	6609 00:FC0E 29 01 AND #SFLG ;FROM INPUT QUEUE
+;	6610 00:FC10 D0 04 BNE P3_GETSD5
+;	6611
+; 	6612 00:FC12 64 47 STZ SDATA_SI3 ;No data RETURN A NULL 
+
 			RTL
 			
-GETCHAR	    JSL		GET_RAW
-			JSL		TOPUPPER	; Make alphabetics Puppercase
+GETCHAR	    LDA		TERMFLAGS		; relying on W265 SBC char in buffer (temporarily) 
+			AND		#%11011111		; Turn off ECHO
+			ORA		#%00010000		; Turn off hardware handshaking to 265 (not run)
+			STA 	TERMFLAGS
+			JSL		GET_RAW
+			JSL		TOPUPPER		; Make alphabetics Puppercase
 			RTL
 
 CLRCMD		LDX		#0
@@ -224,6 +259,8 @@ GLNC0		CMP		#CTRL_C
 			JSL		PUTCHAR
 			LDA		#'C'
 			JSL		PUTCHAR
+			LDA		#CR
+			JSL		PUTCHAR
 			JSL		CLRCMD				; zotch out any command in buffer
 			BRA		GLXIT1
 			; CTRL-C
@@ -234,16 +271,18 @@ GLNC1		CMP		#LF
 			; LF
 GLNC2		CMP		#BS					; We will not tolerate BS here
 			BNE		GLNC9
+			CMP		#DEL	
+			BNE		GLNC9
 			; Handle backspace
 			STZ		CMDBUF,X
 			CPX		#0
 			BEQ		GLLP1				; Already backed over the first character. No index to decrement
-			JSL		PUTCHAR
+			;JSL		PUTCHAR
 			DEX							; change buffer pointer
 			STX		CMDCNT
 			STZ		CMDBUF,X			; Character we backed over is now end of string
 			BRA		GLLP1
-			; enough of BS
+			; enough of this BS stuff
 GLNC9		STA		CMDBUF,X					; store it
 			JSL		PUTCHAR
 			INC		CMDCNT
@@ -302,33 +341,246 @@ PROCESS_LINE
 			LDA		#'"'
 			JSL		PUTCHAR
 			LDY		#CMDBUF
-			JSL		PUT_STR
+			JSL		PUT_STR_CTRL
 			LDA		#'"'
 			JSL		PUTCHAR
 			JSL		CRLF
 			LDA		CMDBUF
-			STA		SDR					; FUBAR - debug of command character
-			CMP		#'L'
-			BNE		PLIC2
-			LDY		#MSG_LOADER
-			JSL		PUT_STR
-			JSL 	SREC_LOADER
-PLIC2		CMP		#'G'
-			BNE 	PLIC3
-			JSL		RUNSPOTRUN
-PLIC3		CMP		#'J'
-			BNE		PLIC9
-			JSL		RUNSPOTRUN
-PLIC9		CMP		#CTRL_C
-			BNE		PLIX1
-			BRK							; return to system monitor
-PLIX1		RTL
+			CMP		#'A'
+			BCC		PLIX1			; < 'A', so not a command
+			CMP		#'Z'+1
+			BCS		PLIX1			; > 'Z', so not a command
+			SBC		#'A'-1			; Carry clear, so subtract one less to account for borrow
+			ASL		A				; JSL is four bytes each			
+			TAX						; index = offset into table
+			LDA		#'='
+			JSL		PUTCHAR
+			TXA
+			JSL		PUTHEX
+			JSL		CRLF
+			TXA
+			JSR		(MONTBL,X)		; Run spot run!  Note these must end in RTS!
+			RTL
+			
+			
+PLIX1:		LDA		#'?'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+PLIX2		RTL
 
 CRLF		LDA		#CR
 			JSL		PUTCHAR
 			LDA		#LF
 			JSL		PUTCHAR
 			RTL
+	
+MONTBL		.word 		CMD_A			; Index 0 = "A"
+			.word		CMD_B
+			.word		CMD_C
+			.word		CMD_D
+			.word		CMD_E
+			.word		CMD_F
+			.word		CMD_G
+			.word		CMD_H
+			.word		CMD_I
+			.word		CMD_J
+			.word		CMD_K
+			.word		CMD_L
+			.word		CMD_M
+			.word		CMD_N
+			.word		CMD_O
+			.word		CMD_P
+			.word		CMD_Q
+			.word		CMD_R
+			.word		CMD_S
+			.word		CMD_T
+			.word		CMD_U
+			.word		CMD_V
+			.word		CMD_W
+			.word		CMD_X
+			.word		CMD_Y
+			.word		CMD_Z
+			;
+			
+CMD_A		LDA		#'A'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_B		LDA		#'B'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_C		LDA		#'C'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_D		LDA		#'D'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_E		LDA		#'E'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_F		LDA		#'F'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+
+CMD_G		LDA		#'G'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_H		LDA		#'H'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_I		LDA		#'I'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+CMD_J		LDA		#'J'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_K		LDA		#'K'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_L		LDA		#'L'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+CMD_M		LDA		#'M'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_N		LDA		#'N'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_O		LDA		#'O'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+CMD_P		LDA		#'P'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_Q		LDA		#'Q'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_R		LDA		#'R'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+CMD_S		LDA		#'S'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_T		LDA		#'T'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_U		LDA		#'U'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+CMD_V		LDA		#'V'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_W		LDA		#'W'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_X		LDA		#'X'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+
+CMD_Y		LDA		#'Y'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS
+			
+CMD_Z		LDA		#'Z'
+			JSL		PUTCHAR
+			LDA		#'!'
+			JSL		PUTCHAR
+			JSL		CRLF
+			RTS		
+				
 			
 RUNSPOTRUN	LDA		#CR
 			JSL		PUTCHAR
