@@ -78,11 +78,30 @@ DEBUG		.byte 	?
 
 
 * = $0400			; Command buffer area
-CMDBUF 		.fill	256					;	
-CMDCNT		.word	?
+CMDBUF 		.fill	256		; can be smaller than 256 but must not cross 8 bit page boundary
+							; because we use 8 bit math to determine stuff and nobody will
+							; want to type a command longer than 256 characters in any case
+CB_W_IX		.word	?		; CMD buffer write index (sometimes in X)
+CB_R_IY		.word	?		; CMD buffer read index (AEIOU sometimes Y)
+; For GETHEX, first 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
+HEXVAL1L	.byte	?
+HEXVAL1H	.byte	?
+HEXVAL1B	.byte	?
+HEXVAL1		=	HEXVAL1L	; 24 bit HEXVAL1
+; For GETHEX, 2nd 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
+HEXVAL2L	.byte	?
+HEXVAL2H	.byte	?
+HEXVAL2B	.byte	?
+HEXVAL2		=	HEXVAL2L	; 24 bit HEXVAL2
+; For GETHEX, 3rd 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
+HEXVAL3L	.byte	?
+HEXVAL3H	.byte	?
+HEXVAL3B	.byte	?
+HEXVAL3		=	HEXVAL3L	; 24 bit HEXVAL3
+
  
 
-STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
+STACKTOP	=	$7EFF	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
 START 		LDY		#QBFMSG				; Start of monitor loop
 			JSL		PUT_STR
@@ -151,13 +170,13 @@ GLNC2		CMP		#BS					; We will not tolerate BS here
 			BEQ		GLLP1				; Already backed over the first character. No index to decrement
 			JSL		PUTCHAR
 			DEX							; change buffer pointer
-			STX		CMDCNT
+			STX		CB_W_IX
 			STZ		CMDBUF,X			; Character we backed over is now end of string
 			BRA		GLLP1
 			; enough of this BS stuff
 GLNC9		STA		CMDBUF,X					; store it
 			JSL		PUTCHAR
-			INC		CMDCNT
+			INC		CB_W_IX
 			INX
 			BRA		GLLP1
 GLXIT1		STZ		CMDBUF,X				; null-terminate the line
@@ -440,7 +459,7 @@ GETCHAR	    LDA		TERMFLAGS		; relying on W265 SBC char in buffer (temporarily)
 			RTL
 
 CLRCMD		LDX		#0
-			STX		CMDCNT
+			STX		CB_W_IX
 			STZ		CMDBUF		; Null terminate the empty buffer
 			RTL
 			
