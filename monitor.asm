@@ -2,6 +2,10 @@
 ; Assembled with 64TASS
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
+
+.INCLUDE	"via_symbols.inc"
+.INCLUDE	"acia_symbols.inc"
+
 ; Monitor hooks
 RAW_GETC	=	$E036
 RAW_PUTC	= 	$E04B
@@ -32,77 +36,7 @@ I_FLAG		= MASK2
 Z_FLAG		= MASK1
 C_FLAG		= MASK0
 
-; TIDE2VIA	the system VIA.  Used by many and defined globally
-; IO for the VIA which is used for the USB debugger interface.
-SYS_VIA_BASE	    = 	$7FE0
-SYSTEM_VIA_IORB     =  	SYS_VIA_BASE+0	; Port B IO register
-SYSTEM_VIA_IORA     =	SYS_VIA_BASE+1 	; Port A IO register
-SYSTEM_VIA_DDRB     = 	SYS_VIA_BASE+2	; Port B data direction register
-SYSTEM_VIA_DDRA     = 	SYS_VIA_BASE+3	; Port A data direction register
-SYSTEM_VIA_T1C_L    =	SYS_VIA_BASE+4 	; Timer 1 counter/latches, low-order
-SYSTEM_VIA_T1C_H    = 	SYS_VIA_BASE+5	; Timer 1 high-order counter
-SYSTEM_VIA_T1L_L    = 	SYS_VIA_BASE+6	; Timer 1 low-order latches
-SYSTEM_VIA_T1L_H    = 	SYS_VIA_BASE+7	; Timer 1 high-order latches
-SYSTEM_VIA_T2C_L    = 	SYS_VIA_BASE+8	; Timer 2 counter/latches, lower-order
-SYSTEM_VIA_T2C_H    = 	SYS_VIA_BASE+9	; Timer 2 high-order counter
-SYSTEM_VIA_SR       = 	SYS_VIA_BASE+10	; Shift register
-SYSTEM_VIA_ACR      = 	SYS_VIA_BASE+11	; Auxilliary control register
-SYSTEM_VIA_PCR      =	SYS_VIA_BASE+12	; Peripheral control register
-SYSTEM_VIA_IFR	    =	SYS_VIA_BASE+13 ; Interrupt flag register
-SYSTEM_VIA_IER      = 	SYS_VIA_BASE+14	; Interrupt enable register
-SYSTEM_VIA_ORA_IRA  =	SYS_VIA_BASE+15	; Port A IO register, but no handshake
 
-DEBUG_VIA_BASE	    = 	$7FC0
-DEBUG_VIA_IORB     =  	DEBUG_VIA_BASE+0	; Port B IO register
-DEBUG_VIA_IORA     =	DEBUG_VIA_BASE+1 	; Port A IO register
-DEBUG_VIA_DDRB     = 	DEBUG_VIA_BASE+2	; Port B data direction register
-DEBUG_VIA_DDRA     = 	DEBUG_VIA_BASE+3	; Port A data direction register
-DEBUG_VIA_T1C_L    =	DEBUG_VIA_BASE+4 	; Timer 1 counter/latches, low-order
-DEBUG_VIA_T1C_H    = 	DEBUG_VIA_BASE+5	; Timer 1 high-order counter
-DEBUG_VIA_T1L_L    = 	DEBUG_VIA_BASE+6	; Timer 1 low-order latches
-DEBUG_VIA_T1L_H    = 	DEBUG_VIA_BASE+7	; Timer 1 high-order latches
-DEBUG_VIA_T2C_L    = 	DEBUG_VIA_BASE+8	; Timer 2 counter/latches, lower-order
-DEBUG_VIA_T2C_H    = 	DEBUG_VIA_BASE+9	; Timer 2 high-order counter
-DEBUG_VIA_SR       = 	DEBUG_VIA_BASE+10	; Shift register
-DEBUG_VIA_ACR      = 	DEBUG_VIA_BASE+11	; Auxilliary control register
-DEBUG_VIA_PCR      =	DEBUG_VIA_BASE+12	; Peripheral control register
-DEBUG_VIA_IFR	    =	DEBUG_VIA_BASE+13 ; Interrupt flag register
-DEBUG_VIA_IER      = 	DEBUG_VIA_BASE+14	; Interrupt enable register
-DEBUG_VIA_ORA_IRA  =	DEBUG_VIA_BASE+15	; Port A IO register, but no handshake
-
-; System VIA Port B named bitmasks
-PB0 = MASK0
-PB1 = MASK1
-PB2 = MASK2
-PB3 = MASK3
-PB4 = MASK4
-PB5 = MASK5
-PB6 = MASK6
-PB7 = MASK7
-; System VIA Port A named bitmasks
-PA0 = MASK0
-PA1 = MASK1
-PA2 = MASK2
-PA3 = MASK3
-PA4 = MASK4
-PA5 = MASK5
-PA6 = MASK6
-PA7 = MASK7
-
-;;; ============================= 65c51 UART functions ======================================
-; 65C51 ACIA equates for serial I/O
-;
-ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
-SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
-SSR = ACIA_BASE+1     		; Serial data status register
-SCMD = ACIA_BASE+2     		; Serial command reg. ()
-SCTL = ACIA_BASE+3     		; Serial control reg. ()
-TX_RDY = MASK4
-RX_RDY = MASK3
-
-
-ALL_INPUTS = $00
-ALL_OUTPUTS = $FF
 ; Put the above equates into an included file per peripheral or board
 
         .cpu    "65816"
@@ -150,103 +84,39 @@ CMDCNT		.word	?
 
 STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
-START 		BRA		MONBAN		;
-			; 816 board initialization.  Skip while developing monitor on 265 board
-			SEI
-			CLC	
-			XCE							; Native mode
-			SEP		#(M_FLAG)			; A,M = 8bit
-			REP		#(X_FLAG | D_FLAG)	; 16 bit index, binary math
-			NOP
-			LDX		#STACKTOP
-			TXS
-			; Load the Databank register (DBR) to $0000
-			LDA		#$00
-			PHA
-			PLD
-			; Load the direct page register to $0000
-			LDX		#$0000
-			PHX
-			PLD	
-			
-			JSL		INIT_FIFO
-			JSL		INIT_SER
-			;
-MONBAN		LDY		#QBFMSG
+START 		LDY		#QBFMSG				; Start of monitor loop
 			JSL		PUT_STR
-MONPROMPT	LDA		#CR
+MONPROMPT	JSL		GETLINE
+			JSL		PROCESS_LINE
+			BRA		MONPROMPT			; End of monitor loop
+	
+; Look in the CMDBUF and dispatch to appropriate command. 	
+PROCESS_LINE
+			LDA		CMDBUF			; FIXME: allow for leading spaces instead of error message
+			CMP		#'A'
+			BCC		PLERRXIT		; < 'A', so not a command
+			CMP		#'Z'+1
+			BCS		PLERRXIT		; > 'Z', so not a command
+			; Convert 'A'-'Z' to 0 to 25 for subroutine call table 
+			SBC		#'A'-1			; Carry clear, so subtract one less to account for borrow
+			ASL		A				; Two bytes per JSR table entry			
+			TAX						; index = offset into table (65C816 unsigned extend to 16 bits)
+			JSR		(MONTBL,X)		; No JSL indirect indexed.  Each table entry MUST end in RTS not RTL!
+			BRA		PLIX2
+PLERRXIT:	JSL		CRLF
+			LDA		#'?'
 			JSL		PUTCHAR
+			LDY		#CMDBUF
+			JSL		PUT_STR_CTRL	; Display buffer contents not understood
+			JSL		CRLF
+PLIX2		RTL
+
+;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
+; Never omit a raw layer of I/O, ever.  Basic design error.
+GETLINE		JSL		CRLF
 			LDA		#'>'
 			JSL		PUTCHAR
-			JSL		GETLINE
-			JSL		PROCESS_LINE
-			BRA		MONPROMPT
-			
-; Test code for balky (possibly decoder issue!) SX816 board
-ECHO		JSL		GETCHF
-			BRA		ECHO
-BLABBER		JSL		TXCHDLY
-			LDA		#'*'
-			STA		SDR
-			JSL		PUTCHF
-			BRA		BLABBER
-	
-; MUST JSL not JSR here	
-PUTCHARTR	CMP		#$20
-			BCS		PUT_RAW
-			PHA					; Display as hex value
-			LDA		#'\'
-			JSL		PUT_RAW
-			PLA
-			JSL		PUTHEX
-PUTCRX1		RTL
-			
-PUTCHAR		
-PUT_RAW		JSL		RAW_PUTC
-			RTL
-
-PUT_STR		LDA		0,Y				; Y points directly to string
-			BEQ		PUTSX
-			JSL		PUT_RAW
-			INY						; point to next character
-			BRA		PUT_STR		
-PUTSX		RTL	
-
-; Show control characters as printable
-PUT_STR_CTRL 
-			LDA		0,Y				; Y points directly to string
-			BEQ		PUTSRX
-			JSL		PUTCHARTR		; Show control characters, etc.
-			INY						; point to next character
-			BRA		PUT_STR_CTRL
-PUTSRX		RTL	
-
-GET_RAW		JSL		RAW_GETC
-GRXIT1		RTL
-
-
-;	6608 00:FC0C A5 43 LDA SFLAG3 ;GET SERIAL BYTE
-;	6609 00:FC0E 29 01 AND #SFLG ;FROM INPUT QUEUE
-;	6610 00:FC10 D0 04 BNE P3_GETSD5
-;	6611
-; 	6612 00:FC12 64 47 STZ SDATA_SI3 ;No data RETURN A NULL 
-
-			RTL
-			
-GETCHAR	    LDA		TERMFLAGS		; relying on W265 SBC char in buffer (temporarily) 
-			AND		#%11011111		; Turn off ECHO
-			ORA		#%00010000		; Turn off hardware handshaking to 265 (not run)
-			STA 	TERMFLAGS
-			JSL		GET_RAW
-			JSL		TOPUPPER		; Make alphabetics Puppercase
-			RTL
-
-CLRCMD		LDX		#0
-			STX		CMDCNT
-			STZ		CMDBUF		; Null terminate the empty buffer
-			RTL
-			
-GETLINE		JSL		CLRCMD
+			JSL		CLRCMD
 GLLP1		JSL		GETCHAR				; Do not echo
 			CMP		#CR
 			BNE		GLNC0
@@ -277,7 +147,7 @@ GLNC2		CMP		#BS					; We will not tolerate BS here
 			STZ		CMDBUF,X
 			CPX		#0
 			BEQ		GLLP1				; Already backed over the first character. No index to decrement
-			;JSL		PUTCHAR
+			JSL		PUTCHAR
 			DEX							; change buffer pointer
 			STX		CMDCNT
 			STZ		CMDBUF,X			; Character we backed over is now end of string
@@ -298,77 +168,6 @@ TOPUPPER	CMP		#'a'				; Make character PupperCase
 			; Note - carry is clear so we subtract one less
 			SBC		#'a'-'A'-1			; Adjust upper case to lower case		
 PUPX1		RTL		
-				
-	
-	
-; Quick n'dirty assignments instead of proper definitions of each parameter
-; "ORed" together to build the desired flexible configuration.  We're going
-; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
-;
-
-SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
-SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
-; the serial port.
-INIT_SER	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-			STA 	SCTL		
-			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-			STA     SCMD
-			RTL
-
-
-GETSER		LDA		SSR
-			AND		#RX_RDY
-			BEQ		GETSER
-			LDA		SDR
-			CLC					; Temporary compatibility return value for blocking/non-blocking
-			RTL
-
-
-
-PUTSER		PHA
-			STA		SDR
-			JSL		TXCHDLY		; Awful kludge
-			PLA
-			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
-			RTL
-		
-				
-			
-
-; ==============================================================================================================================
-PROCESS_LINE	
-			LDA		#'"'
-			JSL		PUTCHAR
-			LDY		#CMDBUF
-			JSL		PUT_STR_CTRL
-			LDA		#'"'
-			JSL		PUTCHAR
-			JSL		CRLF
-			LDA		CMDBUF
-			CMP		#'A'
-			BCC		PLIX1			; < 'A', so not a command
-			CMP		#'Z'+1
-			BCS		PLIX1			; > 'Z', so not a command
-			SBC		#'A'-1			; Carry clear, so subtract one less to account for borrow
-			ASL		A				; JSL is four bytes each			
-			TAX						; index = offset into table
-			LDA		#'='
-			JSL		PUTCHAR
-			TXA
-			JSL		PUTHEX
-			JSL		CRLF
-			TXA
-			JSR		(MONTBL,X)		; Run spot run!  Note these must end in RTS!
-			RTL
-			
-			
-PLIX1:		LDA		#'?'
-			JSL		PUTCHAR
-			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
-PLIX2		RTL
 
 CRLF		LDA		#CR
 			JSL		PUTCHAR
@@ -376,33 +175,7 @@ CRLF		LDA		#CR
 			JSL		PUTCHAR
 			RTL
 	
-MONTBL		.word 		CMD_A			; Index 0 = "A"
-			.word		CMD_B
-			.word		CMD_C
-			.word		CMD_D
-			.word		CMD_E
-			.word		CMD_F
-			.word		CMD_G
-			.word		CMD_H
-			.word		CMD_I
-			.word		CMD_J
-			.word		CMD_K
-			.word		CMD_L
-			.word		CMD_M
-			.word		CMD_N
-			.word		CMD_O
-			.word		CMD_P
-			.word		CMD_Q
-			.word		CMD_R
-			.word		CMD_S
-			.word		CMD_T
-			.word		CMD_U
-			.word		CMD_V
-			.word		CMD_W
-			.word		CMD_X
-			.word		CMD_Y
-			.word		CMD_Z
-			;
+
 			
 CMD_A		LDA		#'A'
 			JSL		PUTCHAR
@@ -612,9 +385,63 @@ RUNSPOTRUN	LDA		#CR
 			BNE		RUNSPOTRUN
 			JML		[SA_B]
 	
-		
 							
+; Test code for balky (possibly decoder issue!) SX816 board
+ECHO		JSL		GETCHF
+			BRA		ECHO
+BLABBER		JSL		TXCHDLY
+			LDA		#'*'
+			STA		SDR
+			JSL		PUTCHF
+			BRA		BLABBER
+	
+; MUST JSL not JSR here	
+PUTCHARTR	CMP		#$20
+			BCS		PUT_RAW
+			PHA					; Display as hex value
+			LDA		#'\'
+			JSL		PUT_RAW
+			PLA
+			JSL		PUTHEX
+PUTCRX1		RTL
+			
+PUTCHAR		
+PUT_RAW		JSL		RAW_PUTC
+			RTL
 
+PUT_STR		LDA		0,Y				; Y points directly to string
+			BEQ		PUTSX
+			JSL		PUT_RAW
+			INY						; point to next character
+			BRA		PUT_STR		
+PUTSX		RTL	
+
+; Show control characters as printable
+PUT_STR_CTRL 
+			LDA		0,Y				; Y points directly to string
+			BEQ		PUTSRX
+			JSL		PUTCHARTR		; Show control characters, etc.
+			INY						; point to next character
+			BRA		PUT_STR_CTRL
+PUTSRX		RTL	
+
+GET_RAW		JSL		RAW_GETC
+GRXIT1		RTL
+
+			
+GETCHAR	    LDA		TERMFLAGS		; relying on W265 SBC char in buffer (temporarily) 
+			AND		#%11011111		; Turn off ECHO
+			ORA		#%00010000		; Turn off hardware handshaking to 265 (not run)
+			STA 	TERMFLAGS
+			JSL		GET_RAW
+			JSL		TOPUPPER		; Make alphabetics Puppercase
+			RTL
+
+CLRCMD		LDX		#0
+			STX		CMDCNT
+			STZ		CMDBUF		; Null terminate the empty buffer
+			RTL
+			
 ;-----------------------------------------------------------------------------------
 ; S-record loader 
 ;S0 06 0000 484452 1B (HDR)
@@ -970,6 +797,67 @@ MKNNH   	SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
         	AND     #$0F    	; no upper nibble no matter what
         	RTL             	; and return the nibble
 
+; Quick n'dirty assignments instead of proper definitions of each parameter
+; "ORed" together to build the desired flexible configuration.  We're going
+; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+;
+
+SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INIT_SER	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
+			STA 	SCTL		
+			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA     SCMD
+			RTL
+
+
+GETSER		LDA		SSR
+			AND		#RX_RDY
+			BEQ		GETSER
+			LDA		SDR
+			CLC					; Temporary compatibility return value for blocking/non-blocking
+			RTL
+
+
+
+PUTSER		PHA
+			STA		SDR
+			JSL		TXCHDLY		; Awful kludge
+			PLA
+			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
+			RTL
+		
+MONTBL		.word 		CMD_A			; Index 0 = "A"
+			.word		CMD_B
+			.word		CMD_C
+			.word		CMD_D
+			.word		CMD_E
+			.word		CMD_F
+			.word		CMD_G
+			.word		CMD_H
+			.word		CMD_I
+			.word		CMD_J
+			.word		CMD_K
+			.word		CMD_L
+			.word		CMD_M
+			.word		CMD_N
+			.word		CMD_O
+			.word		CMD_P
+			.word		CMD_Q
+			.word		CMD_R
+			.word		CMD_S
+			.word		CMD_T
+			.word		CMD_U
+			.word		CMD_V
+			.word		CMD_W
+			.word		CMD_X
+			.word		CMD_Y
+			.word		CMD_Z
+			;			
+			
+			
 MSG_JUMPING:
 	.text	CR,"Jumping to address:",0
 
