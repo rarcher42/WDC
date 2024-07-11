@@ -92,6 +92,8 @@ MONPROMPT	JSL		GETLINE
 	
 ; Look in the CMDBUF and dispatch to appropriate command. 	
 PROCESS_LINE
+			LDA		#0
+			XBA						; Make sure B=0
 			LDA		CMDBUF			; FIXME: allow for leading spaces instead of error message
 			CMP		#'A'
 			BCC		PLERRXIT		; < 'A', so not a command
@@ -100,7 +102,7 @@ PROCESS_LINE
 			; Convert 'A'-'Z' to 0 to 25 for subroutine call table 
 			SBC		#'A'-1			; Carry clear, so subtract one less to account for borrow
 			ASL		A				; Two bytes per JSR table entry			
-			TAX						; index = offset into table (65C816 unsigned extend to 16 bits)
+			TAX						; index = offset into table (65C816 B=0 A=offset)
 			JSR		(MONTBL,X)		; No JSL indirect indexed.  Each table entry MUST end in RTS not RTL!
 			BRA		PLIX2
 PLERRXIT:	JSL		CRLF
@@ -112,7 +114,7 @@ PLERRXIT:	JSL		CRLF
 PLIX2		RTL
 
 ;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
-; Never omit a raw layer of I/O, ever.  Basic design error.
+; Never omit a raw layer of I/O, ever.  Basic design error locking user into behaviors they don't need.
 GETLINE		JSL		CRLF
 			LDA		#'>'
 			JSL		PUTCHAR
