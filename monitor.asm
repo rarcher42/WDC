@@ -6,7 +6,7 @@
 .INCLUDE	"via_symbols.inc"
 .INCLUDE	"acia_symbols.inc"
 
-; Monitor hooks
+; Monitor hooks - These we MUST JSL to
 RAW_GETC	=	$E036
 RAW_PUTC	= 	$E04B
 
@@ -61,12 +61,19 @@ PTR			=		PTR_L
 CTR_L		.byte	?	; Counter
 CTR_H		.byte	?
 CTR_B		.byte	?
+CTR			= 		CTR_L
 
-SA_L		.byte 	?	; Starting address storage
+SA_L		.byte 	?	; Starting address storage for various commands & loader
 SA_H		.byte 	?
 SA_B		.byte	?
-
 SA			=		SA_L
+
+EA_L		.byte 	?	; Starting address storage for various commands
+EA_H		.byte 	?
+EA_B		.byte	?
+EA			=		EA_L
+
+
 DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
 ; A variety of temporary-use variables at discretion and care of coder
 TEMP		.byte 	?
@@ -74,15 +81,29 @@ EXTRA		.byte	? 	; Used inside loader.  Please don't use elsewhere
 TEMP2		.byte	?
 SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
 CHART		.byte	?
-DEBUG		.byte 	?
-
+DEBUG		.byte 	? 
+HEXASSY		.byte	?
 
 * = $0400			; Command buffer area
 CMDBUF 		.fill	256		; can be smaller than 256 but must not cross 8 bit page boundary
 							; because we use 8 bit math to determine stuff and nobody will
 							; want to type a command longer than 256 characters in any case
-CB_W_IX		.word	?		; CMD buffer write index (sometimes in X)
-CB_R_IY		.word	?		; CMD buffer read index (AEIOU sometimes Y)
+; Read and write pointers into command buffer
+CB_RDPTR	.word	?		; Use LDA/STA 0,X typically
+CB_WRPTR	.word 	?		; Use LAD/STA 0,Y typically
+; Parameter metadata
+PRM_SA	.word	?		; Parameter start address
+PRM_SIZ	.byte	?		; Size of current parameter		
+EOLFLAG	.byte	?		; 0 = EOL not found, !0 = EOL has been encountered
+BYTECNT	.byte 	?
+
+
+; 8-24 bit binary I/O buffer for print operations, or to convert incoming to binary 
+HEXIO_L	.byte	?
+HEXIO_H	.byte	?
+HEXIO_B	.byte	?
+HEXIO		=	HEXIO_L		; 	24 bit HEX value to print
+
 ; For GETHEX, first 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
 HEXVAL1L	.byte	?
 HEXVAL1H	.byte	?
@@ -104,55 +125,147 @@ HEXVAL3		=	HEXVAL3L	; 24 bit HEXVAL3
 STACKTOP	=	$7EFF	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
 START 		LDY		#QBFMSG				; Start of monitor loop
-			JSL		PUT_STR
-MONPROMPT	JSL		GETLINE
-			JSL		PROCESS_LINE
-			BRA		MONPROMPT			; End of monitor loop
+			JSR		PUT_STR
+MONGETL		JSR		GETLINE
+			JSR		PARSELINE
+			BRA		MONGETL			; End of monitor loop
+
+; Init the parser pointers and counters for parsing a new line
+INITPARS	STZ		PRM_SIZ			; No known parameter size
+			STZ		EOLFLAG			; No EOL found yet
+			LDA		#>CMDBUF		; Initialize the read pointers
+			STA		CB_RDPTR+1		; High address byte to high pointer byte	
+			STA		PRM_SA+1
+			LDA		#<CMDBUF		; Low address byte to low pointer byte
+			STA		CB_RDPTR
+			STA		PRM_SA			; CB_WRPTR, PRMSA are pointers into CMDBUF e.g. LDA 0,Y/x
+			RTS
+
+CLRCMD		LDX		#CMDBUF		; Point CB_WRPTR to start of command buffer
+			STX		CB_WRPTR
+			STZ		CMDBUF			; Null terminate the empty buffer
+			RTS
 	
 ; Look in the CMDBUF and dispatch to appropriate command. 	
-PROCESS_LINE
+PARSELINE	JSR		INITPARS
+FINDCMD		JSR		FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
+			LDA		EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
+			BNE		PLIX2			; We hit an EOL before an actionable character, so quit
+			; Attempt to dispatch command by first letter from JSR table
 			LDA		#0
-			XBA						; Make sure B=0
-			LDA		CMDBUF			; FIXME: allow for leading spaces instead of error message
+			XBA						; Make B zero so when TAX times comes, MSB of X will be 0! (0 emphasis not 0 factorial)
+			LDX		CB_RDPTR		; point to command byte
+			LDA		0,X				; Get command byte
+			INX						; Point past the command byte to save each subroutine from doing this
+			STX		CB_RDPTR		; "
 			CMP		#'A'
 			BCC		PLERRXIT		; < 'A', so not a command
 			CMP		#'Z'+1
 			BCS		PLERRXIT		; > 'Z', so not a command
 			; Convert 'A'-'Z' to 0 to 25 for subroutine call table 
 			SBC		#'A'-1			; Carry clear, so subtract one less to account for borrow
-			ASL		A				; Two bytes per JSR table entry			
-			TAX						; index = offset into table (65C816 B=0 A=offset)
-			JSR		(MONTBL,X)		; No JSL indirect indexed.  Each table entry MUST end in RTS not RTL!
-			BRA		PLIX2
-PLERRXIT:	JSL		CRLF
-			LDA		#'?'
-			JSL		PUTCHAR
-			LDY		#CMDBUF
-			JSL		PUT_STR_CTRL	; Display buffer contents not understood
-			JSL		CRLF
-PLIX2		RTL
+			ASL		A				; Two bytes per JSR table entry	
+			TAX						; X now holds offset in MONTABLE
+			JSR		(MONTBL,X)		; No JSR indirect indexed.  Each table entry MUST end in RTS not RTL!
+			BRA		PLIX2			; We're done dispatching.  
+			; Whoops, we didn't get 'A'-'Z' so entry not in a JSR table.  Print error
+			; including non-printing control characters, '\nn' Python-style
+PLERRXIT:	JSR		LOLWUT			; Print non-understood buffer plus ?[CR][LF]
+PLIX2		RTS
+	
+			
+; Parameter extraction utility.  
+; Skip any leading whitespace from current read pointer (FIND parameter start)
+; Flag encounter with EOL by setting EOLFLAG to non-zero
+
+; Find parameter start, skipping any leading whitespace but respecting CR, null, and CTRL_C as end of line markers
+; AKA:  "Skip whitespace until not whitespace (or EOL)"
+;
+; Entry:   
+;			CB_RDPTR must point into first unprocessed character in the buffer
+;			PRM_SA = don't care
+;			EOLFLAG = 0 = have not encountered EOL (else why are you calling me?)
+;			PRM_SIZ	= don't care
+; Exit:
+;			CB_RDPTR points to end of parameter or whitespace or EOL
+;			PRM_SA points to first character of current Parameter
+;			PRM_SIZ = Number of bytes in this parameter
+;			
+FINDSTART	LDY		CB_RDPTR
+FSN1		LDA		0,Y				; Get next character
+			BEQ		FSEOL			; Null --> End of line encountered.  We are done
+			CMP		#CR
+			BEQ		FSEOL			; CR = end of line also
+			CMP		#CTRL_C
+			BEQ		FSEOL			; CTRL-C = end of line
+			CMP		#SP+1			; if space or less, and not CR or CTRL-C, skip over
+			BCS		FSDUN			; A non-whitespace character.  We're done looking
+			; A whitespace character that's not special, so keep looking
+			INY						; Keep looking for a valid parameter byte
+			BRA		FSN1			; Next character
+FSEOL		LDA		#1
+			STA		EOLFLAG
+FSDUN		STY		CB_RDPTR		; Save pointers by current value of Y
+			STY		PRM_SA			; Save pointers by current value of Y
+			RTS
+			
+; Parameter extraction utility.
+; Skip valid parameter bytes until whitespace before next parameter, or EOL 
+; AKA: "skip non-whitespace until whitespace (or EOL)"
+; Flag encounter with EOL by setting EOLFLAG to non-zero
+;
+; TL;DR: Find the first character of the NEXT parameter or EOL
+; On entry:
+;			CB_RDPTR = *(next buffer byte to examine)  
+;			PRM_SA = don't care
+;			EOLFLAG = 0 (presumably; no sense in calling again if we previously hit EOL)
+; On exit:
+; 			CB_RDPTR = *first byte of next Parameter begin or EOL
+;			PRM_SA	= *first character of this parameter 
+;			PRM_SIZ = number of bytes in this parameter
+;			EOLFLAG indicates whether end of line has been encountered 
+;
+FINDEND		STZ		PRM_SIZ			; No known parameter bytes yet
+			LDY		CB_RDPTR
+FEN1		LDA		0,Y				; Get next character
+			BEQ		FEEOL			; Null --> End of line encountered.  We are done
+			CMP		#CR
+			BEQ		FEEOL			; CR = end of line also
+			CMP		#CTRL_C
+			BEQ		FEEOL			; CTRL-C = end of line
+			CMP		#SP+1			; if space or less, and not CR or CTRL-C, 
+			BCC		FEDUN1			; A whitespace character.  We're done looking
+			; A non-whitespace character.  Part of current parameter
+			INY
+			INC		PRM_SIZ			; add one more to size of parameter
+			BRA		FEN1
+FEEOL		LDA		#1
+			STA		EOLFLAG
+FEDUN1		STY		CB_RDPTR		; Save pointers by current value of read pointer (don't update PRM_SA)
+			RTS
+			
 
 ;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
-; Never omit a raw layer of I/O, ever.  Basic design error locking user into behaviors they don't need.
-GETLINE		JSL		CRLF
+; Never omit a raw layer of I/O.  Shame on WDC.  Basic design error locking user into behaviors they don't want.
+GETLINE		JSR		CRLF
 			LDA		#'>'
-			JSL		PUTCHAR
-			JSL		CLRCMD
-GLLP1		JSL		GETCHAR				; Do not echo
+			JSR		PUTCHAR
+			JSR		CLRCMD
+GLLP1		JSR		GETCHAR				; Do not echo
 			CMP		#CR
 			BNE		GLNC0
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			BRA		GLXIT1				; end of message
 GLNC0		CMP		#CTRL_C
 			BNE		GLNC1
 			; CTRL-C handler
 			LDA		#'^'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'C'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#CR
-			JSL		PUTCHAR
-			JSL		CLRCMD				; zotch out any command in buffer
+			JSR		PUTCHAR
+			JSR		CLRCMD				; zotch out any command in buffer
 			BRA		GLXIT1
 			; CTRL-C
 GLNC1		CMP		#LF
@@ -165,22 +278,22 @@ GLNC2		CMP		#BS					; We will not tolerate BS here
 			CMP		#DEL	
 			BNE		GLNC9
 			; Handle backspace
-			STZ		CMDBUF,X
-			CPX		#0
+			STZ		0,X
+			CPX		#CMDBUF
 			BEQ		GLLP1				; Already backed over the first character. No index to decrement
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			DEX							; change buffer pointer
-			STX		CB_W_IX
-			STZ		CMDBUF,X			; Character we backed over is now end of string
+			STX		CB_WRPTR
+			STZ		0,X					; Character we backed over is now end of string
 			BRA		GLLP1
 			; enough of this BS stuff
-GLNC9		STA		CMDBUF,X					; store it
-			JSL		PUTCHAR
-			INC		CB_W_IX
+GLNC9		STA		0,X					; store it
+			JSR		PUTCHAR
 			INX
+			STX		CB_WRPTR
 			BRA		GLLP1
-GLXIT1		STZ		CMDBUF,X				; null-terminate the line
-			RTL
+GLXIT1		STZ		0,X					; null-terminate the line
+			RTS
 			
 TOPUPPER	CMP		#'a'				; Make character PupperCase
 			BCC		PUPX1				; A < 'a' so can't be lowercase char
@@ -188,281 +301,442 @@ TOPUPPER	CMP		#'a'				; Make character PupperCase
 			BCS		PUPX1				; A > 'z', so can't be lowercase char	
 			; Note - carry is clear so we subtract one less
 			SBC		#'a'-'A'-1			; Adjust upper case to lower case		
-PUPX1		RTL		
+PUPX1		RTS		
 
-CRLF		LDA		#CR
-			JSL		PUTCHAR
-			LDA		#LF
-			JSL		PUTCHAR
-			RTL
-	
+; Dump a range of addresses.  For now we won't remember previous dump addresses, so the acceptable formats are:
+; "D 00"		- Dump one byte starting at 00:0000
+; "D 1234" 	- Dump one byte starting at 00:1234
+; "D 00:1234" - Dump one byte starting at 00:1234
+;
+; "D 00 1F"	- Dump bytes from 00:0000 to 00:001F, inclusive
+; "D 1234 3456" - Dump bytes from 00:1234 to 00:3456, inclusive
+; "D 00:1234 01:0100" - Dump bytes from 00:1234 to 01:0100, inclusive
+; "D 001234 010100" - Dump bytes from 00:1234 to 01:0100, inclusive
+; "D 00:1234 010100" - Dump bytes from 00:1234 to 01:0100, inclusive
+; "D 001234 01:0100" - Dump bytes from 00:1234 to 01:0100, inclusive
+; "D 1234 01:0100" - Dump bytes from 00:1234 to 01:0100, inclusive
+; "D 001234 010100" - Dump bytes from 00:1234 to 01:0100, inclusive
+;
+; Note: at 9600 baud, sending more than 64K of bytes will take approximately "forever" and therefore IS NOT SUPPORTED.
+; If the ending address is more than 64K higher than the starting address, you will get less than you asked for 
+; because you were being a dumb-dumb. :)
+; Second address (if specified) must be higher in memory than first address
+CMD_DUMPHEX JSR		JUSTCR				; Give some space
+			JSR		FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
+			LDA		EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
+			BEQ		CDH_NOTEOL		; Not EOL, so start dumping data		
+			BRL		DHEXX2			; We hit an EOL before an actionable character, so quit
+CDH_NOTEOL	STZ		BYTECNT			; First line and every 16 bytes will show current address
+			JSR		FINDEND			; Get the next parameter's start address in PRM_SA and length in PRM_SIZ
+			JSR		CONVHEX			; Get starting address in HEXIO
+			LDA		HEXIO_B			; Put starting address in PTR
+			STA		PTR_B
+			LDA		HEXIO_H
+			STA		PTR_H
+			LDA		HEXIO_L
+			STA		PTR_L
+			; See if there's an ending address specified
+			JSR		FINDSTART		;Get next parameter
+			LDA		EOLFLAG			; is there one?
+			BEQ		DHSAVEA			; save end address if not EOL after start address read
+			; Dump just one byte
+			STZ		CTR_B
+			STZ		CTR_H
+			LDA		#1
+			STA		CTR_L
+			BRL		DUMPITNOW
+DHSAVEA		JSR		FINDEND		
+			; Compute the number of bytes to Dump
+			JSR		CONVHEX			; get 8 to 24 bit end address
+			LDA		HEXIO_B
+			STA		EA_B
+			LDA		HEXIO_H
+			STA		EA_H
+			LDA		HEXIO_L
+			STA		EA_L
+			; Compute number of bytes to dump.  EA >= SA.  FIXME, 16 bits only, no SA > EA detection yet
+			SEC
+			LDA		EA_L	
+			SBC		PTR_L
+			STA		CTR_L
+			LDA		EA_H
+			SBC		PTR_H
+			STA		CTR_H
+			LDA		EA_B
+			SBC		PTR_B			; Just to be thorough, should we support > 64K dump someday
+			STA		CTR_B
+			; Add 1 for starting byte
+			CLC						; Probably can make this more efficient
+			LDA		CTR_L			; Calculate byte count of dump in CTR
+			ADC		#1
+			STA		CTR_L
+			LDA		CTR_H
+			ADC		#0
+			STA		CTR_H
+			LDA		CTR_B
+			ADC		#0
+			STA		CTR_B
+DUMPITNOW	LDA		CTR_L			; Check for done
+			ORA		CTR_H
+			ORA		CTR_B
+			BEQ 	DHEXX1			; We're done
+			LDA		BYTECNT
+			BNE		DUMPITN1		; 
+DHEXC6		JSR		JUSTCR
+			LDA		PTR_B
+			STA		HEXIO_B
+			LDA		PTR_H
+			STA		HEXIO_H
+			LDA		PTR_L
+			STA		HEXIO_L
+			JSR		PUTHEX24		; Print the address
+			LDA		#':'
+			JSR		PUTCHAR
+			LDA		#SP
+			JSR		PUTCHAR			;
+			LDA		#SP
+			JSR		PUTCHAR
+DUMPITN1	LDA		[PTR]			; Dump CTR bytes starting at [PTR]
+			JSR		PUTHEXA
+			LDA		#' '
+			JSR		PUTCHAR
+			CLC
+			LDA		PTR_L
+			ADC		#1
+			STA		PTR_L
+			LDA		PTR_H
+			ADC		#0
+			STA		PTR_H
+			LDA		PTR_B
+			ADC		#0
+			STA		PTR_B
+DHEXC3		SEC
+			LDA		CTR_L			; one less byte to print out
+			SBC		#1
+			STA		CTR_L
+			LDA		CTR_H
+			SBC		#0
+			STA		CTR_H
+			LDA		CTR_B
+			SBC		#0
+			STA		CTR_B
+			INC 	BYTECNT
+			LDA		BYTECNT
+			CMP		#16
+			BNE		DUMPITNOW
+			STZ		BYTECNT
+			BRA		DUMPITNOW		; Print the address at start of new line
+			; Print the bufstart for parameter and length for debug or comment out
+DHEXX1		;
+DHEXX2		RTS
 
+; "W 00:1234 01 02 03 04"
+; "W 001234 AA BB CC DD"
+; "W 1234 01"
+; "W 20 00 01 02 03"
+; "W 0020 00 01 02 03"
+CMD_WRITEBYTES
+			JSR		JUSTCR			; Give some space
+			JSR		FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
+			LDA		EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
+			BNE		CWBXX2			; We hit an EOL before an actionable character, so quit
+			JSR		FINDEND			; Get the next parameter's start address in PRM_SA and length in PRM_SIZ
+			JSR		CONVHEX			; Get starting address in HEXIO
+			LDA		HEXIO_B			; Transfer starting address from HEXIO to PTR
+			STA		PTR_B
+			LDA		HEXIO_H
+			STA		PTR_H
+			LDA		HEXIO_L
+			STA		PTR_L			
+CWLOOP1		JSR		FINDSTART		; Get next byte
+			LDA		EOLFLAG
+			BNE		CWBXX2
+			JSR		FINDEND			; Find end of Parameter
+			JSR		RDHEX8
+			STA		[PTR]			; Attempt to store.  If ROM, output will show failure to write
+			; Debug start
+			LDA		PTR_B
+			STA		HEXIO_B
+			LDA		PTR_H
+			STA		HEXIO_H
+			LDA		PTR_L
+			STA		HEXIO_L
+			JSR		PUTHEX24
+			LDA		#'<'
+			JSR		PUTCHAR
+			LDA		#'-'
+			JSR		PUTCHAR
+			LDA		[PTR]			; Read the actual byte (if ROM, won't match input)
+			JSR		PUTHEXA
+			JSR		JUSTCR
+			; Increment PTR
+			CLC	
+			LDA		PTR_L
+			ADC		#1
+			STA		PTR_L
+			LDA		PTR_H
+			ADC		#0
+			STA		PTR_H
+			LDA		PTR_B
+			ADC		#0
+			STA		PTR_B			
+			BRA		CWLOOP1
+CWBXX2		RTS		
 			
+CMD_LOAD	LDY		#MSG_LOAD
+			JSR		PUT_STR	
+			JSR		SREC_LOADER
+			RTS
+			
+LOLWUT		JSR		CRLF
+			LDY		#CMDBUF
+			JSR		PUT_STR_CTRL	; Display buffer contents not understood; show non-printing too!
+			JSR		CRLF
+			LDA		#'?'
+			JSR		PUTCHAR
+CRLF		LDA		#LF
+			JSR		PUTCHAR
+JUSTCR		LDA		#CR
+			JSR		PUTCHAR
+			RTS
+		
 CMD_A		LDA		#'A'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_B		LDA		#'B'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_C		LDA		#'C'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
-			
+
 CMD_D		LDA		#'D'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_E		LDA		#'E'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_F		LDA		#'F'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 
-CMD_G		LDA		#'G'
-			JSL		PUTCHAR
-			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
-			RTS
+CMD_GO		JSR		JUSTCR			; Give some space
+			JSR		FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
+			LDA		EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
+			BNE		CGXIT1			; We hit an EOL before an actionable character, so quit
+			JSR		FINDEND			; Get the next parameter's start address in PRM_SA and length in PRM_SIZ
+			JSR		CONVHEX			; Get starting address in HEXIO
+			LDA		HEXIO_B			; Transfer starting address from HEXIO to PTR
+			STA		PTR_B
+			LDA		HEXIO_H
+			STA		PTR_H
+			LDA		HEXIO_L
+			STA		PTR_L	
+			LDY		#MSG_JUMP
+			JSR		PUT_STR
+			JSR		PUTHEX24
+			JSR		CRLF			; get rid of return address since we're not returing!
+			; JMP		[PTR]			; There's really no exit
+CGXIT1		RTS						; Might return if no valid jump address
+
 			
 CMD_H		LDA		#'H'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_I		LDA		#'I'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 CMD_J		LDA		#'J'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_K		LDA		#'K'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
-CMD_L		LDA		#'L'
-			JSL		PUTCHAR
-			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
 			RTS
 CMD_M		LDA		#'M'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_N		LDA		#'N'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_O		LDA		#'O'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 CMD_P		LDA		#'P'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_Q		LDA		#'Q'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_R		LDA		#'R'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 CMD_S		LDA		#'S'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_T		LDA		#'T'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_U		LDA		#'U'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 CMD_V		LDA		#'V'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
-			RTS
-			
-CMD_W		LDA		#'W'
-			JSL		PUTCHAR
-			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_X		LDA		#'X'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 
 CMD_Y		LDA		#'Y'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS
 			
 CMD_Z		LDA		#'Z'
-			JSL		PUTCHAR
+			JSR		PUTCHAR
 			LDA		#'!'
-			JSL		PUTCHAR
-			JSL		CRLF
+			JSR		PUTCHAR
+			JSR		CRLF
 			RTS		
 				
+
+JUMPNOW		LDA		#CR
+			JSR		PUTCHAR
 			
-RUNSPOTRUN	LDA		#CR
-			JSL		PUTCHAR
-			LDY		#MSG_6HEX
-			JSL		PUT_STR
-			JSL		GETHEX
-			STA		SA_B
-			JSL		GETHEX
-			STA		SA_H
-			JSL		GETHEX
-			STA		SA_L
-			LDY		#MSG_JUMPING
-			JSL		PUT_STR
-			LDA		SA_B
-			JSL		PUTHEX
-			LDA		#':'
-			JSL		PUTCHAR
-			LDA		SA_H
-			JSL		PUTHEX
-			LDA		SA_L
-			JSL		PUTHEX
-			LDA		#CR
-			JSL		PUTCHAR
-			LDY		#MSG_CONFIRM
-			JSL		PUT_STR
-			JSL		GETCHAR
-			JSL		PUTCHAR
-			CMP		#'Y'
-			BNE		RUNSPOTRUN
 			JML		[SA_B]
 	
 							
 ; Test code for balky (possibly decoder issue!) SX816 board
-ECHO		JSL		GETCHF
+ECHO		JSR		GETCHF
 			BRA		ECHO
-BLABBER		JSL		TXCHDLY
+BLABBER		JSR		TXCHDLY
 			LDA		#'*'
 			STA		SDR
-			JSL		PUTCHF
+			JSR		PUTCHF
 			BRA		BLABBER
 	
-; MUST JSL not JSR here	
+; MUST JSR not JSR here	
 PUTCHARTR	CMP		#$20
 			BCS		PUT_RAW
 			PHA					; Display as hex value
 			LDA		#'\'
-			JSL		PUT_RAW
+			JSR		PUT_RAW
 			PLA
-			JSL		PUTHEX
-PUTCRX1		RTL
+			JSR		PUTHEXA
+PUTCRX1		RTS
 			
 PUTCHAR		
 PUT_RAW		JSL		RAW_PUTC
-			RTL
+			RTS
 
 PUT_STR		LDA		0,Y				; Y points directly to string
 			BEQ		PUTSX
-			JSL		PUT_RAW
+			JSR		PUT_RAW
 			INY						; point to next character
 			BRA		PUT_STR		
-PUTSX		RTL	
+PUTSX		RTS	
 
 ; Show control characters as printable
 PUT_STR_CTRL 
 			LDA		0,Y				; Y points directly to string
 			BEQ		PUTSRX
-			JSL		PUTCHARTR		; Show control characters, etc.
+			JSR		PUTCHARTR		; Show control characters, etc.
 			INY						; point to next character
 			BRA		PUT_STR_CTRL
-PUTSRX		RTL	
+PUTSRX		RTS	
 
 GET_RAW		JSL		RAW_GETC
-GRXIT1		RTL
+GRXIT1		RTS
 
 			
 GETCHAR	    LDA		TERMFLAGS		; relying on W265 SBC char in buffer (temporarily) 
 			AND		#%11011111		; Turn off ECHO
 			ORA		#%00010000		; Turn off hardware handshaking to 265 (not run)
 			STA 	TERMFLAGS
-			JSL		GET_RAW
-			JSL		TOPUPPER		; Make alphabetics Puppercase
-			RTL
+			JSR		GET_RAW
+			JSR		TOPUPPER		; Make alphabetics Puppercase
+			RTS
 
-CLRCMD		LDX		#0
-			STX		CB_W_IX
-			STZ		CMDBUF		; Null terminate the empty buffer
-			RTL
-			
+
 ;-----------------------------------------------------------------------------------
 ; S-record loader 
 ;S0 06 0000 484452 1B (HDR)
@@ -474,15 +748,15 @@ CLRCMD		LDX		#0
 ; FIXME: This is a hyper-minimal loader, in fine board bring up tradition.
 ; Will probably use this loader to develop a much better loader :D
 SREC_LOADER	
-SYNC	JSL		GETCHAR				; Wait for "S" to start a new record
+SYNC	JSR		GETCHAR				; Wait for "S" to start a new record
 		CMP		#'S'
 		BNE		SYNC
 		LDA		#'@'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		; Optimistically assume start of record.
-		JSL		GETCHAR
+		JSR		GETCHAR
 		STA		REC_TYPE										
-		JSL		GETHEX				; Get message length byte
+		JSR		GETHEX				; Get message length byte
 		STA		DATA_CNT			; Save number of bytes in record
 		LDA		REC_TYPE			; Decode and dispatch	
 		BEQ		GETREMS				; read the comment block
@@ -492,95 +766,95 @@ SYNC	JSL		GETCHAR				; Wait for "S" to start a new record
 		BEQ		GET24ADDR
 		CMP		#'5'
 		BNE		SLC4
-		JML		CNT16
+		BRA		CNT16
 SLC4	CMP		#'6'
 		BNE		SLC2
-		JML		CNT24
+		BRA		CNT24
 SLC2	CMP		#'8'
 		BNE		SLC1
-		JML		SA24		; Too far for relative branch
+		BRL		SA24		; Too far for relative branch
 SLC1	CMP		#'9'
 		BNE		SLC3
-		JML		SA16
+		BRA		SA16
 		; We'll ignore everything else, including the HDR record
-SLC3	JML		SYNC
+SLC3	BRA		SYNC
 
 GETREMS	LDA		#'0'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		LDA		#'#'
-		JSL		PUTCHAR
-		JML		SYNC
+		JSR		PUTCHAR
+		BRA		SYNC
 GET24ADDR
 		LDA		#'2'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#4			; Data length -= 3 bytes address + 1 byte checksum 
 		STA		DATA_CNT	; Adjust data count to include only payload data bytes
-		JSL		GETHEX
+		JSR		GETHEX
 		STA		PTR_B
 		BRA		GET1624
 GET16ADDR
 		LDA		#'1'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		LDA		DATA_CNT	
 		SEC		
 		SBC		#3			; Data length -= 2 bytes address + 1 byte checksum 
 		STA		DATA_CNT	; Adjust data count to include only payload data bytes
 		STZ		PTR_B		; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
-GET1624	JSL		GETHEX		; Got bank value (or set to 0). Now get high and low address
+GET1624	JSR		GETHEX		; Got bank value (or set to 0). Now get high and low address
 		STA		PTR_H
-		JSL		GETHEX
+		JSR		GETHEX
 		STA		PTR_L
 
 ; Now check to see if any bytes remain to be written 
 SAVDAT:	LDA		DATA_CNT	; A record can have 0 data bytes, theoretically. So check at top
-		BEQ		SAVDX1		; No more data to PROCESS_LINE
-SAVDAT2	JSL		GETHEX
+		BEQ		SAVDX1		; No more data to PARSELINE
+SAVDAT2	JSR		GETHEX
 		STA		[PTR]		; 24 bit indirect save
-		JSL		INC_PTR		; Point to next byte
+		JSR		INC_PTR		; Point to next byte
 		DEC		DATA_CNT
 		BNE		SAVDAT2
 SAVDX1	LDA		#'#'
-		JSL		PUTCHAR
-		JML		SYNC		; FIXME: parse the checksum and end of line
+		JSR		PUTCHAR
+		BRL		SYNC		; FIXME: parse the checksum and end of line
 		
 ; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
 CNT16	LDA		#'5'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		STZ		CTR_B
 		BRA		CN16C1
 CNT24:	LDA		#'6'
-		JSL		PUTCHAR
-		JSL		GETHEX
+		JSR		PUTCHAR
+		JSR		GETHEX
 		STA		CTR_B
-CN16C1	JSL		GETHEX		; bits 15-8
+CN16C1	JSR		GETHEX		; bits 15-8
 		STA		CTR_H
-		JSL		GETHEX		; bits 7-0
+		JSR		GETHEX		; bits 7-0
 		STA		CTR_L
 		LDA		#'#'
-		JSL		PUTCHAR
-		JML		SYNC		; FIXME: parse the rest of the record & end of line
+		JSR		PUTCHAR
+		BRL		SYNC		; FIXME: parse the rest of the record & end of line
 
 ; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
 SA16	LDA		#'9'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		STZ		SA_B
 		BRA		SA16C1
 SA24	LDA		#'8'
-		JSL		PUTCHAR
-		JSL		GETHEX		; length byte
+		JSR		PUTCHAR
+		JSR		GETHEX		; length byte
 		STZ		SA_B
-SA16C1	JSL		GETHEX		; bits 15-8
+SA16C1	JSR		GETHEX		; bits 15-8
 		STA		SA_H
-		JSL		GETHEX		; bits 7-0
+		JSR		GETHEX		; bits 7-0
 		STA		SA_L
 		LDA		#'&'
-		JSL		PUTCHAR
-GOEOL	JSL		GETCHAR
+		JSR		PUTCHAR
+GOEOL	JSR		GETCHAR
 		CMP		#CR
 		BNE		GOEOL
-		JML		MONPROMPT
+		RTS
 
 ; 24 bit binary pointer increment.  We're in 8 bit accumulator mode, so it's 3 bytes.
 INC_PTR	INC		PTR_L		; point to the next byte to save to
@@ -588,35 +862,96 @@ INC_PTR	INC		PTR_L		; point to the next byte to save to
 		INC		PTR_H	
 		BNE		INCPX1
 		INC		PTR_B
-INCPX1	RTL
+INCPX1	RTS
+
+; Convert bytes at CB_RDPTR and CB_RDPTR+1 and convert to hex into A
+; Note: this advance parameter pointer!
+RDHEX8	PHY
+		LDY		PRM_SA			; Start at beginning of current parameter
+RDHX8L1	LDA		0,Y				; Get MSB from *(parameter)
+		INY						; advance to (hopefully) ASCII LSB
+		CMP		#':'			; Kludgey special handling for ':'
+		BEQ		RDHX8L1
+RDHX8C1	JSR		MKNIBL	
+		ASL		A				; Note: MKNIBL ANDs off higher 4 bits, so no '1' sign extension can occur
+		ASL		A 
+		ASL		A 
+		ASL		A				; shift left 4 because upper nibble
+		STA		HEXASSY			; temporary storage.  Only used within this function. Can re-use in any foreground context.
+RDHX8L2	LDA		0,Y				; Get LSB *(parameter+1)
+		INY						; point to next ASCII hex byte (if any)
+		CMP		#':'
+		BEQ		RDHX8L2			; Anti-metamucel (ignore colons) Note pathological buffer with all ':' is possible.  We will tolerate. 
+		STY		PRM_SA			;	"
+		JSR		MKNIBL
+		ORA		HEXASSY			; Assemble the parts
+		PLY
+		RTS						; return the byte in A
+		
+			
+; Look at CMDBUF for PRM_SIZE bytes starting at CMD_RDPTR and attempt to create 8-24 bit hex in HEXIO binary buffer
+; On exit, none of the pointers are changed.  Let higher level functions do this
+CONVHEX	
+		STZ		HEXIO_B			; Only write bytes explicitly set in buffer parameter string, else 0
+		STZ		HEXIO_H
+		STZ		HEXIO_L
+		LDA		PRM_SIZ			; 24 bit cases are "00:1234" or "001234", 16 bit is "1234", 8 bit is "2A"
+		CMP		#2				; See if not even 8 bits (must be two digits to qualify as a hex value by fiat)
+		BCC		CVHKWIT			; Too short to be a valid hex parameter.  Must be 2 or more characters 
+		CMP		#3
+		BCS		CHXCHK16
+		; Interpret as 8 bits
+		JSR		RDHEX8
+		STA		HEXIO_L
+		BRA		CVHKWIT
+CHXCHK16	
+		CMP		#5
+		BCS		CHXCHK24
+		; Interpret as 16 bit value
+		JSR		RDHEX8
+		STA		HEXIO_H
+		JSR		RDHEX8
+		STA		HEXIO_L
+		BRA		CVHKWIT
+CHXCHK24
+		CMP		#8
+		BCS		CVHKWIT			; Give up if >= 8 characters!
+		; 6 digit value
+		JSR		RDHEX8
+		STA		HEXIO_B
+		JSR		RDHEX8
+		STA		HEXIO_H
+		JSR		RDHEX8
+		STA		HEXIO_L
+CVHKWIT	RTS	
 
 ; Basic conversions	
-GETHEX  JSL 	GETCHAR
+GETHEX  JSR 	GETCHAR
 		CMP		#CTRL_C
 		BNE		GHECC1
 		LDA		#'^'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		LDA		#'C'
-		JSL		PUTCHAR
-        JML		MONPROMPT
-GHECC1	JSL     MKNIBL  	; Convert to 0..F numeric
+		JSR		PUTCHAR
+        RTS					; bail
+GHECC1	JSR     MKNIBL  	; Convert to 0..F numeric
         ASL     A
         ASL     A
         ASL     A
         ASL     A       	; This is the upper nibble
         AND     #$F0
         STA     SUBTEMP
-        JSL     GETCHAR
+        JSR     GETCHAR
 		CMP		#CTRL_C
 		BNE		GHECC2
 		LDA		#'^'
-		JSL		PUTCHAR
+		JSR		PUTCHAR
 		LDA		#'C'
-		JSL		PUTCHAR
-		JML		MONPROMPT
-GHECC2	JSL     MKNIBL
+		JSR		PUTCHAR
+		RTS					; bail
+GHECC2	JSR     MKNIBL
         ORA    	SUBTEMP
-        RTL
+        RTS
 
 
 		
@@ -664,29 +999,29 @@ FIFO_DEBUG = PB7		; Handy debug toggle output free for any use
 SEL_BANK3
 		LDA		#%11111111
 		STA		SYSTEM_VIA_PCR	
-		RTL
+		RTS
 	
 SEL_BANK2
 		LDA		#%11111101
 		STA		SYSTEM_VIA_PCR	
-		RTL
+		RTS
 		
 SEL_BANK1
 		LDA		#%11011111
 		STA		SYSTEM_VIA_PCR	
-		RTL
+		RTS
 
 SEL_BANK0
 		LDA		#%11011101
 		STA		SYSTEM_VIA_PCR	
-		RTL
+		RTS
 		
 INIT_SYSVIA
 		LDA		#%11111111
 		STA		SYSTEM_VIA_PCR	
 		STZ		SYSTEM_VIA_DDRA
 		STZ		SYSTEM_VIA_DDRB
-		RTL
+		RTS
 	
 ; NOTE:  DO NOT CALL THIS if you're not powering via micro USB as the FIFO chip will never get power and become ready!	
 INIT_FIFO
@@ -700,13 +1035,13 @@ INIT_FIFO
 		LDA		#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
 		STA		SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
 		; Defensively wait for ports to settle 
-		RTL								; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
+		RTS								; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
 FIFOPWR	NOP								; FIXME: Defensive and possibly unnecessary
 		; FIXME: Add timeout here
 		LDA		SYSTEM_VIA_IORB
 		AND		#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
 		BNE		FIFOPWR	
-		RTL
+		RTS
 
 		
 PUTCHF	STA		TEMP2
@@ -740,7 +1075,7 @@ OFCONT	STZ		SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating
 		STZ		SYSTEM_VIA_DDRA		; Make port A an input again
 		CLC				; signal success of write to caller
 OFX1	LDA		TEMP2
-		RTL
+		RTS
 ;
 ;
 		
@@ -767,7 +1102,7 @@ GETCHF
 		STA		SYSTEM_VIA_IORB
 		PLA
 		CLC				; we got a byte!
-INFXIT	RTL
+INFXIT	RTS
 
 ; A kludge until timers work to limit transmit speed to avoid TX overruns
 ; This is kind of terrible.  Replace.
@@ -788,16 +1123,25 @@ DLY_Y		DEY
 			NOP
 			BNE		DLY_Y
 			PLY
-			RTL
+			RTS
 
-			
+; Print 8 to 24 bit values in HEXIO_B, HEXIO_H, HEXIO_L buffer as this is very commonly needed
+PUTHEX24:	LDA		HEXIO_B
+			JSR		PUTHEXA
+			LDA		#':'
+			JSR		PUTCHAR
+PUTHEX16:	LDA		HEXIO_H
+			JSR		PUTHEXA
+PUTHEX8:	LDA		HEXIO_L
+			JSR		PUTHEXA
+			RTS
 	
-PUTHEX  	PHA             	;
+PUTHEXA  	PHA             	;
         	LSR 	A
         	LSR 	A
 			LSR 	A
 			LSR 	A
-        	JSL     PRNIBL
+        	JSR     PRNIBL
         	PLA
 PRNIBL  	AND     #$0F    	; strip off the low nibble
         	CMP     #$0A
@@ -805,8 +1149,8 @@ PRNIBL  	AND     #$0F    	; strip off the low nibble
         	ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
 NOTHEX  	ADC     #'0'    	; If carry clear, we're 0-9
 ; Write the character in A as ASCII:
-PUTCH		JSL		PUTCHAR
-			RTL
+PUTCH		JSR		PUTCHAR
+			RTS
 
         ; 
 ; Convert the ASCII nibble to numeric value from 0-F:
@@ -816,7 +1160,7 @@ MKNIBL  	CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)
         	; If we fall through, carry is set unlike direct entry at MKNNH
 MKNNH   	SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
         	AND     #$0F    	; no upper nibble no matter what
-        	RTL             	; and return the nibble
+        	RTS             	; and return the nibble
 
 ; Quick n'dirty assignments instead of proper definitions of each parameter
 ; "ORed" together to build the desired flexible configuration.  We're going
@@ -831,7 +1175,7 @@ INIT_SER	LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
 			STA 	SCTL		
 			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
 			STA     SCMD
-			RTL
+			RTS
 
 
 GETSER		LDA		SSR
@@ -839,16 +1183,16 @@ GETSER		LDA		SSR
 			BEQ		GETSER
 			LDA		SDR
 			CLC					; Temporary compatibility return value for blocking/non-blocking
-			RTL
+			RTS
 
 
 
 PUTSER		PHA
 			STA		SDR
-			JSL		TXCHDLY		; Awful kludge
+			JSR		TXCHDLY		; Awful kludge
 			PLA
 			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
-			RTL
+			RTS
 		
 MONTBL		.word 		CMD_A			; Index 0 = "A"
 			.word		CMD_B
@@ -856,31 +1200,31 @@ MONTBL		.word 		CMD_A			; Index 0 = "A"
 			.word		CMD_D
 			.word		CMD_E
 			.word		CMD_F
-			.word		CMD_G
+			.word		CMD_GO
 			.word		CMD_H
 			.word		CMD_I
-			.word		CMD_J
+			.word		CMD_GO
 			.word		CMD_K
-			.word		CMD_L
+			.word		CMD_LOAD
 			.word		CMD_M
 			.word		CMD_N
 			.word		CMD_O
 			.word		CMD_P
 			.word		CMD_Q
-			.word		CMD_R
+			.word		CMD_DUMPHEX
 			.word		CMD_S
 			.word		CMD_T
 			.word		CMD_U
 			.word		CMD_V
-			.word		CMD_W
+			.word		CMD_WRITEBYTES
 			.word		CMD_X
 			.word		CMD_Y
 			.word		CMD_Z
 			;			
 			
-			
 MSG_JUMPING:
-	.text	CR,"Jumping to address:",0
+	.text	CR,"Jumping to address: $"
+	.text	0
 
 MSG_LOADER
 	.text	CR,"Loader started!",CR
@@ -912,7 +1256,14 @@ ANYKEY:	.text	LF,LF
 	.text 	"Press the ANY key (CTRL-C) to return to monitor",CR
 	.text   "else continue foxing:"
 	.text	0
-
+MSG_LOAD
+	.text 	CR,"SEND S19 or S28 S-RECORD file:",CR
+	.text 	0
+	
+MSG_JUMP
+	.text 	CR,"Jumping to address: $"
+	.text 	0
+	
 * = $FFE4
 NCOP	.word		START		; COP exception in native mode
 * = $FFE6

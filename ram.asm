@@ -75,7 +75,7 @@ STACKTOP	=	$6000	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 	.as	; A=8 bits
 	.xl	; X, Y = 16 bits
 
-* = $2000	; RAM load address
+* = $6000	; RAM load address
 START 		SEI
 			CLC	
 			XCE							; Native mode
