@@ -76,21 +76,17 @@ EA			=		EA_L
 
 DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
 ; A variety of temporary-use variables at discretion and care of coder
-TEMP		.byte 	?
-EXTRA		.byte	? 	; Used inside loader.  Please don't use elsewhere
 TEMP2		.byte	?
 SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
-CHART		.byte	?
-DEBUG		.byte 	? 
 HEXASSY		.byte	?
 
 * = $0400			; Command buffer area
-CMDBUF 		.fill	256		; can be smaller than 256 but must not cross 8 bit page boundary
-							; because we use 8 bit math to determine stuff and nobody will
-							; want to type a command longer than 256 characters in any case
+CMDBUF 		.fill	256	; can be smaller than 256 but must not cross 8 bit page boundary
+				; because we use 8 bit math to determine stuff and nobody will
+				; want to type a command longer than 256 characters in any case
 ; Read and write pointers into command buffer
-CB_RDPTR	.word	?		; Use LDA/STA 0,X typically
-CB_WRPTR	.word 	?		; Use LAD/STA 0,Y typically
+CB_RDPTR	.word	?	; Use LDA/STA 0,X typically
+CB_WRPTR	.word 	?	; Use LAD/STA 0,Y typically
 ; Parameter metadata
 PRM_SA	.word	?		; Parameter start address
 PRM_SIZ	.byte	?		; Size of current parameter		
@@ -102,30 +98,12 @@ BYTECNT	.byte 	?
 HEXIO_L	.byte	?
 HEXIO_H	.byte	?
 HEXIO_B	.byte	?
-HEXIO		=	HEXIO_L		; 	24 bit HEX value to print
+HEXIO		=	HEXIO_L				; 24 bit HEX value to print
 
-; For GETHEX, first 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
-HEXVAL1L	.byte	?
-HEXVAL1H	.byte	?
-HEXVAL1B	.byte	?
-HEXVAL1		=	HEXVAL1L	; 24 bit HEXVAL1
-; For GETHEX, 2nd 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
-HEXVAL2L	.byte	?
-HEXVAL2H	.byte	?
-HEXVAL2B	.byte	?
-HEXVAL2		=	HEXVAL2L	; 24 bit HEXVAL2
-; For GETHEX, 3rd 8-24 bit hex value (leading zeroes to make it 24 bits regardless)
-HEXVAL3L	.byte	?
-HEXVAL3H	.byte	?
-HEXVAL3B	.byte	?
-HEXVAL3		=	HEXVAL3L	; 24 bit HEXVAL3
-
- 
-
-STACKTOP	=	$7EFF	; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
+STACKTOP	=	$7EFF				; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
 * = $2000		
 START 		
-			LDY	#QBFMSG				; Start of monitor loop
+			LDY	#QBFMSG			; Start of monitor loop
 			JSR	PUT_STR
 MONGETL		
 			JSR	GETLINE
@@ -145,7 +123,7 @@ INITPARS
 			RTS
 
 CLRCMD		
-			LDX	#CMDBUF		; Point CB_WRPTR to start of command buffer
+			LDX	#CMDBUF			; Point CB_WRPTR to start of command buffer
 			STX	CB_WRPTR
 			STZ	CMDBUF			; Null terminate the empty buffer
 			RTS
@@ -159,10 +137,10 @@ FINDCMD
 			BNE	PLIX2			; We hit an EOL before an actionable character, so quit
 			; Attempt to dispatch command by first letter from JSR table
 			LDA	#0
-			XBA						; Make B zero so when TAX times comes, MSB of X will be 0! (0 emphasis not 0 factorial)
+			XBA				; Make B zero so when TAX times comes, MSB of X will be 0! (0 emphasis not 0 factorial)
 			LDX	CB_RDPTR		; point to command byte
-			LDA	0,X				; Get command byte
-			INX						; Point past the command byte to save each subroutine from doing this
+			LDA	0,X			; Get command byte
+			INX				; Point past the command byte to save each subroutine from doing this
 			STX	CB_RDPTR		; "
 			CMP	#'A'
 			BCC	PLERRXIT		; < 'A', so not a command
@@ -170,7 +148,7 @@ FINDCMD
 			BCS	PLERRXIT		; > 'Z', so not a command
 			; Convert 'A'-'Z' to 0 to 25 for subroutine call table 
 			SBC	#'A'-1			; Carry clear, so subtract one less to account for borrow
-			ASL	A				; Two bytes per JSR table entry	
+			ASL	A			; Two bytes per JSR table entry	
 			TAX						; X now holds offset in MONTABLE
 			JSR	(MONTBL,X)		; No JSR indirect indexed.  Each table entry MUST end in RTS not RTL!
 			BRA	PLIX2			; We're done dispatching.  
@@ -185,7 +163,7 @@ PLIX2
 ; Parameter extraction utility.  
 ; Skip any leading whitespace from current read pointer (FIND parameter start)
 ; Flag encounter with EOL by setting EOLFLAG to non-zero
-
+u
 ; Find parameter start, skipping any leading whitespace but respecting CR, null, and CTRL_C as end of line markers
 ; AKA:  "Skip whitespace until not whitespace (or EOL)"
 ;
@@ -202,7 +180,7 @@ PLIX2
 FINDSTART	
 			LDY	CB_RDPTR
 FSN1		
-			LDA	0,Y				; Get next character
+			LDA	0,Y			; Get next character
 			BEQ	FSEOL			; Null --> End of line encountered.  We are done
 			CMP	#CR
 			BEQ	FSEOL			; CR = end of line also
@@ -294,7 +272,7 @@ GLNC1
 			BRA	GLLP1
 			; LF
 GLNC2		
-			CMP	#BS					; We will not tolerate BS here
+			CMP	#BS				; We will not tolerate BS here
 			BNE	GLNC9
 			CMP	#DEL	
 			BNE	GLNC9
@@ -303,19 +281,19 @@ GLNC2
 			CPX	#CMDBUF
 			BEQ	GLLP1				; Already backed over the first character. No index to decrement
 			JSR	PUTCHAR
-			DEX							; change buffer pointer
+			DEX					; change buffer pointer
 			STX	CB_WRPTR
-			STZ	0,X					; Character we backed over is now end of string
+			STZ	0,X				; Character we backed over is now end of string
 			BRA	GLLP1
 			; enougs BS (backspace)
 GLNC9		
-			STA	0,X					; store it
+			STA	0,X				; store it
 			JSR	PUTCHAR
 			INX
 			STX	CB_WRPTR
 			BRA	GLLP1
 GLXIT1		
-			STZ	0,X					; null-terminate the line
+			STZ	0,X				; null-terminate the line
 			RTS
 			
 TOPUPPER	
@@ -347,7 +325,7 @@ PUPX1
 ; because you were being a dumb-dumb. :)
 ; Second address (if specified) must be higher in memory than first address
 CMD_DUMPHEX 
-			JSR	JUSTCR				; Give some space
+			JSR	JUSTCR			; Give some space
 			JSR	FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
 			LDA	EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
 			BEQ	CDH_NOTEOL		; Not EOL, so start dumping data		
@@ -394,7 +372,7 @@ DHSAVEA
 			SBC	PTR_B			; Just to be thorough, should we support > 64K dump someday
 			STA	CTR_B
 			; Add 1 for starting byte
-			CLC						; Probably can make this more efficient
+			CLC				; Probably can make this more efficient
 			LDA	CTR_L			; Calculate byte count of dump in CTR
 			ADC	#1
 			STA	CTR_L
@@ -542,7 +520,7 @@ CMD_GO
 			JSR	PUT_STR
 			JSR	PUTHEX24
 			JSR	CRLF			; get rid of return address since we're not returing!
-			; JMP	[PTR]			; There's really no exit
+			JML	[PTR]			; There's really no exit
 CGXIT1		
 			RTS						; Might return if no valid jump address
 
@@ -551,7 +529,7 @@ CGXIT1
 LOLWUT		
 			JSR	CRLF
 			LDY	#CMDBUF
-			JSR	PUT_STR_CTRL	; Display buffer contents not understood; show non-printing too!
+			JSR	PUT_STR_CTRL		; Display buffer contents not understood; show non-printing too!
 			JSR	CRLF
 			LDA	#'?'
 			JSR	PUTCHAR
@@ -630,7 +608,7 @@ PUT_STR
 			LDA	0,Y				; Y points directly to string
 			BEQ	PUTSX
 			JSR	PUT_RAW
-			INY						; point to next character
+			INY					; point to next character
 			BRA	PUT_STR		
 PUTSX		
 			RTS	
@@ -639,8 +617,8 @@ PUTSX
 PUT_STR_CTRL 
 			LDA	0,Y				; Y points directly to string
 			BEQ	PUTSRX
-			JSR	PUTCHARTR		; Show control characters, etc.
-			INY						; point to next character
+			JSR	PUTCHARTR			; Show control characters, etc.
+			INY					; point to next character
 			BRA	PUT_STR_CTRL
 PUTSRX		
 			RTS	
@@ -673,7 +651,7 @@ GETCHAR
 ; Will probably use this loader to develop a much better loader :D
 SREC_LOADER	
 SYNC	
-			JSR	GETCHAR				; Wait for "S" to start a new record
+			JSR	GETCHAR			; Wait for "S" to start a new record
 			CMP	#'S'
 			BNE	SYNC
 			LDA	#'@'
@@ -681,10 +659,10 @@ SYNC
 			; Optimistically assume start of record.
 			JSR	GETCHAR
 			STA	REC_TYPE										
-			JSR	GETHEX				; Get message length byte
-			STA	DATA_CNT			; Save number of bytes in record
-			LDA	REC_TYPE			; Decode and dispatch	
-			BEQ	GETREMS				; read the comment block
+			JSR	GETHEX			; Get message length byte
+			STA	DATA_CNT		; Save number of bytes in record
+			LDA	REC_TYPE		; Decode and dispatch	
+			BEQ	GETREMS			; read the comment block
 			CMP	#'1'
 			BEQ	GET16ADDR
 			CMP	#'2'
@@ -699,7 +677,7 @@ SLC4
 SLC2	
 			CMP	#'8'
 			BNE	SLC1
-			BRL	SA24		; Too far for relative branch
+			BRL	SA24			; Too far for relative branch
 SLC1	
 			CMP	#'9'
 			BNE	SLC3
@@ -720,7 +698,7 @@ GET24ADDR
 			LDA	DATA_CNT	
 			SEC		
 			SBC	#4			; Data length -= 3 bytes address + 1 byte checksum 
-			STA	DATA_CNT	; Adjust data count to include only payload data bytes
+			STA	DATA_CNT		; Adjust data count to include only payload data bytes
 			JSR	GETHEX
 			STA	PTR_B
 			BRA	GET1624
@@ -730,28 +708,28 @@ GET16ADDR
 			LDA	DATA_CNT	
 			SEC		
 			SBC	#3			; Data length -= 2 bytes address + 1 byte checksum 
-			STA	DATA_CNT	; Adjust data count to include only payload data bytes
-			STZ	PTR_B		; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
+			STA	DATA_CNT		; Adjust data count to include only payload data bytes
+			STZ	PTR_B			; 16 bit records.  Default Bank to 0!  (0+! NOT 0!=1)
 GET1624	
-			JSR	GETHEX		; Got bank value (or set to 0). Now get high and low address
+			JSR	GETHEX			; Got bank value (or set to 0). Now get high and low address
 			STA	PTR_H
 			JSR	GETHEX
 			STA	PTR_L
 
 ; Now check to see if any bytes remain to be written 
 SAVDAT:	
-			LDA	DATA_CNT	; A record can have 0 data bytes, theoretically. So check at top
-			BEQ	SAVDX1		; No more data to PARSELINE
+			LDA	DATA_CNT		; A record can have 0 data bytes, theoretically. So check at top
+			BEQ	SAVDX1			; No more data to PARSELINE
 SAVDAT2	
 			JSR	GETHEX
-			STA	[PTR]		; 24 bit indirect save
-			JSR	INC_PTR		; Point to next byte
+			STA	[PTR]			; 24 bit indirect save
+			JSR	INC_PTR			; Point to next byte
 			DEC	DATA_CNT
 			BNE	SAVDAT2
 SAVDX1	
 			LDA	#'#'
 			JSR	PUTCHAR
-			BRL	SYNC		; FIXME: parse the checksum and end of line
+			BRL	SYNC			; FIXME: parse the checksum and end of line
 		
 ; S5, S6 records - record 24 bit value in CTR_B, CTR_H, CTR_L	
 CNT16	
@@ -765,13 +743,13 @@ CNT24:
 			JSR	GETHEX
 			STA	CTR_B
 CN16C1	
-			JSR	GETHEX		; bits 15-8
+			JSR	GETHEX			; bits 15-8
 			STA	CTR_H
-			JSR	GETHEX		; bits 7-0
+			JSR	GETHEX			; bits 7-0
 			STA	CTR_L
 			LDA	#'#'
 			JSR	PUTCHAR
-			BRL	SYNC		; FIXME: parse the rest of the record & end of line
+			BRL	SYNC			; FIXME: parse the rest of the record & end of line
 
 ; S8 or S9 record will terminate the loading, so it MUST be last (and typically is)
 SA16	
@@ -782,12 +760,12 @@ SA16
 SA24	
 			LDA	#'8'
 			JSR	PUTCHAR
-			JSR	GETHEX		; length byte
+			JSR	GETHEX			; length byte
 			STZ	SA_B
 SA16C1	
-			JSR	GETHEX		; bits 15-8
+			JSR	GETHEX			; bits 15-8
 			STA	SA_H
-			JSR	GETHEX		; bits 7-0
+			JSR	GETHEX			; bits 7-0
 			STA	SA_L
 			LDA	#'&'
 			JSR	PUTCHAR
@@ -799,7 +777,7 @@ GOEOL
 
 ; 24 bit binary pointer increment.  We're in 8 bit accumulator mode, so it's 3 bytes.
 INC_PTR
-			INC	PTR_L		; point to the next byte to save to
+			INC	PTR_L			; point to the next byte to save to
 			BNE	INCPX1	
 			INC	PTR_H	
 			BNE	INCPX1
@@ -813,27 +791,27 @@ RDHEX8
 			PHY
 			LDY	PRM_SA			; Start at beginning of current parameter
 RDHX8L1	
-			LDA	0,Y				; Get MSB from *(parameter)
-			INY						; advance to (hopefully) ASCII LSB
+			LDA	0,Y			; Get MSB from *(parameter)
+			INY				; advance to (hopefully) ASCII LSB
 			CMP	#':'			; Kludgey special handling for ':'
 			BEQ	RDHX8L1
 RDHX8C1	
 			JSR	MKNIBL	
-			ASL	A				; Note: MKNIBL ANDs off higher 4 bits, so no '1' sign extension can occur
+			ASL	A			; Note: MKNIBL ANDs off higher 4 bits, so no '1' sign extension can occur
 			ASL	A 
 			ASL	A 
-			ASL	A				; shift left 4 because upper nibble
+			ASL	A			; shift left 4 because upper nibble
 			STA	HEXASSY			; temporary storage.  Only used within this function. Can re-use in any foreground context.
 RDHX8L2	
-			LDA	0,Y				; Get LSB *(parameter+1)
-			INY					; point to next ASCII hex byte (if any)
+			LDA	0,Y			; Get LSB *(parameter+1)
+			INY				; point to next ASCII hex byte (if any)
 			CMP	#':'
 			BEQ	RDHX8L2			; Anti-metamucel (ignore colons) Note pathological buffer with all ':' is possible.  We will tolerate. 
 			STY	PRM_SA			;	"
 			JSR	MKNIBL
 			ORA	HEXASSY			; Assemble the parts
 			PLY
-			RTS						; return the byte in A
+			RTS				; return the byte in A
 		
 			
 ; Look at CMDBUF for PRM_SIZE bytes starting at CMD_RDPTR and attempt to create 8-24 bit hex in HEXIO binary buffer
@@ -843,7 +821,7 @@ CONVHEX
 			STZ	HEXIO_H
 			STZ	HEXIO_L
 			LDA	PRM_SIZ			; 24 bit cases are "00:1234" or "001234", 16 bit is "1234", 8 bit is "2A"
-			CMP	#2				; See if not even 8 bits (must be two digits to qualify as a hex value by fiat)
+			CMP	#2			; See if not even 8 bits (must be two digits to qualify as a hex value by fiat)
 			BCC	CVHKWIT			; Too short to be a valid hex parameter.  Must be 2 or more characters 
 			CMP	#3
 			BCS	CHXCHK16
@@ -882,13 +860,13 @@ GETHEX
 			JSR	PUTCHAR
 			LDA	#'C'
 			JSR	PUTCHAR
-       		 	RTS					; bail
+       		 	RTS				; bail
 GHECC1	
-			JSR     MKNIBL  	; Convert to 0..F numeric
+			JSR     MKNIBL  		; Convert to 0..F numeric
 	       	 	ASL     A
        		 	ASL     A
 	        	ASL     A
-	       	 	ASL     A       	; This is the upper nibble
+	       	 	ASL     A       		; This is the upper nibble
   	     	 	AND     #$F0
        		 	STA     SUBTEMP
 	        	JSR     GETCHAR
@@ -898,7 +876,7 @@ GHECC1
 			JSR	PUTCHAR
 			LDA	#'C'
 			JSR	PUTCHAR
-			RTS					; bail
+			RTS				; bail
 GHECC2	
 			JSR     MKNIBL
         		ORA    	SUBTEMP
@@ -986,12 +964,12 @@ INIT_FIFO
 			LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
 			STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
 			; Defensively wait for ports to settle 
-			RTS								; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
+			RTS					; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
 FIFOPWR	
-			NOP								; FIXME: Defensive and possibly unnecessary
+			NOP					; FIXME: Defensive and possibly unnecessary
 			; FIXME: Add timeout here
 			LDA	SYSTEM_VIA_IORB
-			AND	#FIFO_PWREN				; PB5 = PWRENB. 0=enabled 1=disabled
+			AND	#FIFO_PWREN			; PB5 = PWRENB. 0=enabled 1=disabled
 			BNE	FIFOPWR	
 			RTS
 
@@ -999,19 +977,19 @@ FIFOPWR
 PUTCHF	
 			STA	TEMP2
 			LDA	SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
-			AND	#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-			SEC								; FIFO is full, so don't try to queue it!	
-			BNE	OFX1					; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
+			AND	#FIFO_TXE			; If TXE is low, we can accept data into FIFO.  If high, return immmediately
+			SEC					; FIFO is full, so don't try to queue it!	
+			BNE	OFX1				; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 			; FIFO has room - write A to FIFO in a series of steps
 OFCONT	
 			STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
 			LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 			STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
-			LDA	TEMP2					; Restore the data to send
+			LDA	TEMP2				; Restore the data to send
 			STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
-			LDA	#$FF					; make Port A all outputs with stable output value already set in prior lines
+			LDA	#$FF				; make Port A all outputs with stable output value already set in prior lines
 			STA	SYSTEM_VIA_DDRA			; Save data to output latches
-			NOP								; Some settling time of data output just to be safe
+			NOP					; Some settling time of data output just to be safe
 			NOP	
 			NOP
 			NOP
@@ -1019,15 +997,15 @@ OFCONT
 			NOP
 			; Now the data's stable on PA0-7, pull WR line low (leave RD high)
 			LDA	#(FIFO_RD)			; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
-			STA	SYSTEM_VIA_IORB		; Low-going WR pulse should latch data
+			STA	SYSTEM_VIA_IORB			; Low-going WR pulse should latch data
 			NOP	; Hold time following write strobe, to ensure value is latched OK
 			NOP
 			NOP
 			NOP
 			NOP
 			NOP
-			STZ	SYSTEM_VIA_DDRA		; Make port A an input again
-			CLC				; signal success of write to caller
+			STZ	SYSTEM_VIA_DDRA			; Make port A an input again
+			CLC					; signal success of write to caller
 OFX1	
 			LDA	TEMP2
 			RTS
@@ -1038,31 +1016,31 @@ OFX1
 ; If Carry flag is clear, A contains the next byte from the FIFO
 ; If carry flag is set, there were no characters waiting
 GETCHF	
-			LDA	SYSTEM_VIA_IORB		; Check RXF flag
+			LDA	SYSTEM_VIA_IORB			; Check RXF flag
 			AND	#FIFO_RXF			; If clear, we're OK to read.  If set, there's no data waiting
 			SEC
 			BNE 	INFXIT				; If RXF is 1, then no character is waiting!
-			STZ	SYSTEM_VIA_DDRA		; Make Port A inputs
+			STZ	SYSTEM_VIA_DDRA			; Make Port A inputs
 			LDA	#FIFO_RD
-			STA	SYSTEM_VIA_IORB		; RD=1 WR=0 (RD must go to 0 to read
+			STA	SYSTEM_VIA_IORB			; RD=1 WR=0 (RD must go to 0 to read
 			NOP
-			STZ	SYSTEM_VIA_IORB		; RD=0 WR=0	- FIFO presents data to port A	
-			NOP
-			NOP
+			STZ	SYSTEM_VIA_IORB			; RD=0 WR=0	- FIFO presents data to port A	
 			NOP
 			NOP
-			LDA	SYSTEM_VIA_IORA		; read data in
+			NOP
+			NOP
+			LDA	SYSTEM_VIA_IORA			; read data in
 			PHA
-			LDA	#FIFO_RD		; Restore back to inactive signals RD=1 and WR=0
+			LDA	#FIFO_RD			; Restore back to inactive signals RD=1 and WR=0
 			STA	SYSTEM_VIA_IORB
 			PLA
-			CLC				; we got a byte!
+			CLC					; we got a byte!
 INFXIT	
 			RTS
 
 ; A kludge until timers work to limit transmit speed to avoid TX overruns
 ; This is kind of terrible.  Replace.
-TX_DLY_CYCLES = $0940			; Not tuned.  As it's temporary, optimum settings are unimportant.
+TX_DLY_CYCLES = $0940						; Not tuned.  As it's temporary, optimum settings are unimportant.
 ; $24FF - reliable
 ; $1280 - reliable
 ; $0940 - reliable
@@ -1152,7 +1130,7 @@ GETSER
 			AND	#RX_RDY
 			BEQ	GETSER
 			LDA	SDR
-			CLC					; Temporary compatibility return value for blocking/non-blocking
+			CLC			; Temporary compatibility return value for blocking/non-blocking
 			RTS
 
 
@@ -1162,11 +1140,11 @@ PUTSER
 			STA	SDR
 			JSR	TXCHDLY		; Awful kludge
 			PLA
-			CLC					; Temporary compatibility return value for integration for blocking/non-blocking
+			CLC			; Temporary compatibility return value for integration for blocking/non-blocking
 			RTS
 		
 MONTBL		
-			.word 	CMD_A			; Index 0 = "A"
+			.word 	CMD_A		; Index 0 = "A"
 			.word	CMD_B
 			.word	CMD_C
 			.word	CMD_D
@@ -1277,5 +1255,5 @@ ERESET
 EIRQ	
 		.word	START 
 
-.end				; finally.  das Ende.  Fini.  It's over.  Go home!
+.end					; finally.  das Ende.  Fini.  It's over.  Go home!
 
