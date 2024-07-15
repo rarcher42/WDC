@@ -1,0 +1,58 @@
+
+; 64tass Turbo Assembler Macro V1.59.3120 listing file
+; 64tass -c -L ram.lst --s-record -o ram.hex ram.asm
+; Sun Jul 14 21:28:06 2024
+
+;Offset	;Hex		;Monitor	;Source
+
+;******  Processing input file: ram.asm
+
+=3					CTRL_C	= 3
+=10					LF		= 10
+=13					CR		= 13
+=32					SP		= 32
+=$00e036				RAW_GETC = $00E036
+=$00e04b				RAW_PUTC = $00E04B
+=$002000				FAKEMON  = $002000
+.6000					START
+.6000	a0 1f 60	ldy #$601f				LDY		#MSG_FOXRAM
+.6003	20 12 60	jsr $6012				JSR		PUT_STR
+.6006	22 36 e0 00	jsl $00e036	POINTLESS	JSL		RAW_GETC
+.600a	c9 03		cmp #$03				CMP		#CTRL_C
+.600c	d0 f2		bne $6000				BNE		START
+.600e	5c 00 20 00	jml $002000				JML		FAKEMON
+.6012					PUT_STR
+.6012	b9 00 00	lda $0000,y				LDA	0,Y				; Y points directly to string
+.6015	f0 07		beq $601e				BEQ	PUTSX
+.6017	22 4b e0 00	jsl $00e04b				JSL	RAW_PUTC
+.601b	c8		iny					INY						; point to next character
+.601c	80 f4		bra $6012				BRA	PUT_STR
+.601e					PUTSX
+.601e	60		rts					RTS
+.601f					MSG_FOXRAM
+>601f	0d 0d					.text 	CR,CR
+>6021	20 20 20 20 20 20 20 20			.text	"        I YAM RUNNING INDA RAM!",CR
+>6029	49 20 59 41 4d 20 52 55 4e 4e 49 4e 47 20 49 4e
+>6039	44 41 20 52 41 4d 21 0d
+>6041	20 20 20 20 20 20 20 20		 	.text	"        _,-=._              /|_/|",CR
+>6049	5f 2c 2d 3d 2e 5f 20 20 20 20 20 20 20 20 20 20
+>6059	20 20 20 20 2f 7c 5f 2f 7c 0d
+>6063	20 20 20 20 20 20 20 2a		 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR
+>606b	2d 2e 7d 20 20 20 60 3d 2e 5f 2c 2e 2d 3d 2d 2e
+>607b	5f 2e 2c 20 20 40 20 40 2e 5f 2c 0d
+>6087	20 20 20 20 20 20 20 20		 	.text   "          `._ _,-.   )      _,.-'",CR
+>608f	20 20 60 2e 5f 20 5f 2c 2d 2e 20 20 20 29 20 20
+>609f	20 20 20 20 5f 2c 2e 2d 27 0d
+>60a9	20 20 20 20 20 20 20 20		    .text   "             `    G.m-'^m'm'",CR
+>60b1	20 20 20 20 20 60 20 20 20 20 47 2e 6d 2d 27 5e
+>60c1	6d 27 6d 27 0d
+>60c6	20 20 20 20 20 20 20 20			.text   "          Foxy art by: Dmytro O. Redchuk",CR,CR
+>60ce	20 20 46 6f 78 79 20 61 72 74 20 62 79 3a 20 44
+>60de	6d 79 74 72 6f 20 4f 2e 20 52 65 64 63 68 75 6b
+>60ee	0d 0d
+>60f0	20 43 54 52 4c 2d 43 20			.text   " CTRL-C to return to WDC Monitor",CR
+>60f8	74 6f 20 72 65 74 75 72 6e 20 74 6f 20 57 44 43
+>6108	20 4d 6f 6e 69 74 6f 72 0d
+>6111	00				    .text	0
+
+;******  End of listing

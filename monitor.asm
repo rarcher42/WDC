@@ -163,7 +163,6 @@ PLIX2
 ; Parameter extraction utility.  
 ; Skip any leading whitespace from current read pointer (FIND parameter start)
 ; Flag encounter with EOL by setting EOLFLAG to non-zero
-u
 ; Find parameter start, skipping any leading whitespace but respecting CR, null, and CTRL_C as end of line markers
 ; AKA:  "Skip whitespace until not whitespace (or EOL)"
 ;

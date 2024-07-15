@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L monitor.lst --s-record -o monitor.hex monitor.asm
-; Fri Jul 12 14:42:55 2024
+; Sun Jul 14 20:58:07 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -187,7 +187,6 @@
 .2057	20 95 22	jsr $2295				JSR	LOLWUT			; Print non-understood buffer plus ?[CR][LF]
 .205a					PLIX2
 .205a	60		rts					RTS
-.205b					u
 .205b					FINDSTART
 .205b	ac 00 05	ldy $0500				LDY	CB_RDPTR
 .205e					FSN1
