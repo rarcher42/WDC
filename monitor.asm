@@ -76,7 +76,7 @@ EA			=		EA_L
 
 DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
 ; A variety of temporary-use variables at discretion and care of coder
-TEMP2		.byte	?
+FIFO_PIT	.byte	?
 SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
 HEXASSY		.byte	?
 
@@ -382,7 +382,7 @@ SEL_BANK0
 			RTS
 		
 INIT_SYSVIA
-			LDA	#%11111111
+			LDA	#$FF
 			STA	SYSTEM_VIA_PCR	
 			STZ	SYSTEM_VIA_DDRA
 			STZ	SYSTEM_VIA_DDRB
@@ -397,20 +397,20 @@ INIT_FIFO
 			STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
 			LDA	#FIFO_RD				;
 			STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-			LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
+			LDA	#(FIFO_RD + FIFO_WR)		; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
 			STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
+			JSR	TXCHDLY				; Should wait (with timeout!) on PWERENB signal going low on power up or after.  
+			JSR	TXCHDLY				; Timeout is essential in case board is powered off RS232 port, 
+			JSR	TXCHDLY				; in which case the FIFO will not get power and this pin will never be (active) low.
 			JSR	TXCHDLY
 			JSR	TXCHDLY
-			JSR	TXCHDLY
-			JSR	TXCHDLY
-			JSR	TXCHDLY
-			RTS					; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
+			RTS					
 
 		
 ; Non-blocking Put FIFO.  Return with carry flag set if buffer is full and nothing was output. 
 ; Return carry clear upon successful queuing
 PUT_FRAW	
-			STA	TEMP2
+			STA	FIFO_PIT
 			LDA	SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
 			AND	#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 			SEC							; FIFO is full, so don't try to queue it!	
@@ -420,7 +420,7 @@ OFCONT
 			STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
 			LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 			STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
-			LDA TEMP2							; Restore the data to send
+			LDA 	FIFO_PIT			; Restore the data to send
 			STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
 			LDA	#$FF				; make Port A all outputs with stable output value already set in prior lines
 			STA	SYSTEM_VIA_DDRA			; Save data to output latches
@@ -432,7 +432,7 @@ OFCONT
 			STZ	SYSTEM_VIA_DDRA			; Make port A an input again
 			CLC					; signal success of write to caller
 OFX1	
-			LDA	TEMP2
+			LDA	FIFO_PIT
 			RTS
 ;
 ;
