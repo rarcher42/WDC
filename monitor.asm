@@ -484,7 +484,32 @@ DLY_Y
 			PLY
 			RTS
 			
+INC_SA24
+			CLC
+			LDA	PTR_L
+			ADC	#1
+			STA	PTR_L
+			LDA	PTR_H
+			ADC	#0
+			STA	PTR_H
+			LDA	PTR_B
+			ADC	#0
+			STA	PTR_B
+			RTS
+DEC_CTR24
+			SEC
+			LDA	CTR_L			; one less byte to print out
+			SBC	#1
+			STA	CTR_L
+			LDA	CTR_H
+			SBC	#0
+			STA	CTR_H
+			LDA	CTR_B
+			SBC	#0
+			STA	CTR_B
+			RTS
 
+	
 ; Dump a range of addresses.  For now we won't remember previous dump addresses, so the acceptable formats are:
 ; "D 00"		- Dump one byte starting at 00:0000
 ; "D 1234" 	- Dump one byte starting at 00:1234
@@ -508,7 +533,7 @@ CMD_DUMPHEX
 			JSR	FINDSTART		; Skip over whitespace.  On return CB_RDPTR, PRM_SA hold start of first/next parameter
 			LDA	EOLFLAG			; OR if we hit EOL, then there's no command byte on the line and we have nothing to process
 			BEQ	CDH_NOTEOL		; Not EOL, so start dumping data		
-			BRL	DHEXX2			; We hit an EOL before an actionable character, so quit
+			BRL	DHEXX1			; We hit an EOL before an actionable character, so quit
 CDH_NOTEOL	
 			STZ	BYTECNT			; First line and every 16 bytes will show current address
 			JSR	FINDEND			; Get the next parameter's start address in PRM_SA and length in PRM_SIZ
@@ -588,27 +613,9 @@ DUMPITN1
 			JSR	PUTHEXA
 			LDA	#' '
 			JSR	PUTCHAR
-			CLC
-			LDA	PTR_L
-			ADC	#1
-			STA	PTR_L
-			LDA	PTR_H
-			ADC	#0
-			STA	PTR_H
-			LDA	PTR_B
-			ADC	#0
-			STA	PTR_B
+			JSR	INC_SA24		; Next source address
 DHEXC3		
-			SEC
-			LDA	CTR_L			; one less byte to print out
-			SBC	#1
-			STA	CTR_L
-			LDA	CTR_H
-			SBC	#0
-			STA	CTR_H
-			LDA	CTR_B
-			SBC	#0
-			STA	CTR_B
+			JSR	DEC_CTR24
 			INC 	BYTECNT
 			LDA	BYTECNT
 			CMP	#16
@@ -617,8 +624,6 @@ DHEXC3
 			BRA	DUMPITNOW		; Print the address at start of new line
 			; Print the bufstart for parameter and length for debug or comment out
 DHEXX1		
-			;
-DHEXX2		
 			RTS
 
 ; "W 00:1234 01 02 03 04"
@@ -748,7 +753,15 @@ CMD_Z
 			JSR	PUT_STR
 			RTS		
 					
-; MUST JSR not JSR here	
+
+PUTCHARDOT		CMP	#SP
+			BCS	PCDPRINT
+			LDA	#'.'
+PCDPRINT		
+			JSR	PUTCHAR
+			RTS
+
+
 PUTCHARTR	
 			CMP	#$20
 			BCS	PUTCHAR
