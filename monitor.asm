@@ -357,7 +357,8 @@ PUT_FIFO
 			BCS	PUT_FIFO
 			RTS
 			
-GET_FIFO	JSR GET_FRAW
+GET_FIFO	
+			JSR 	GET_FRAW
 			BCS	GET_FIFO
 			RTS
 			
@@ -393,8 +394,8 @@ INIT_SYSVIA
 ; NOTE:  Kludge delay until timer because if powered by RS232 not USB, the FIFO will never report power enable signal and we'll hang forever.	
 INIT_FIFO
 			LDA	#$FF
-			STA SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
-			STZ SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+			STA 	SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
+			STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
 			STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
 			STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
 			LDA	#FIFO_RD				;

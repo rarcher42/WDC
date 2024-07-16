@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L monitor.lst --intel-hex -o monitor.hex monitor.asm
-; Mon Jul 15 17:58:08 2024
+; Tue Jul 16 05:44:40 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -300,7 +300,8 @@
 .f91a	20 72 f9	jsr $f972				JSR	PUT_FRAW
 .f91d	b0 fb		bcs $f91a				BCS	PUT_FIFO
 .f91f	60		rts					RTS
-.f920	20 9c f9	jsr $f99c	GET_FIFO	JSR GET_FRAW
+.f920					GET_FIFO
+.f920	20 9c f9	jsr $f99c				JSR 	GET_FRAW
 .f923	b0 fb		bcs $f920				BCS	GET_FIFO
 .f925	60		rts					RTS
 .f926					SEL_BANK3
@@ -327,8 +328,8 @@
 .f949	60		rts					RTS
 .f94a					INIT_FIFO
 .f94a	a9 ff		lda #$ff				LDA	#$FF
-.f94c	8d ec 7f	sta $7fec				STA SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
-.f94f	9c eb 7f	stz $7feb				STZ SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+.f94c	8d ec 7f	sta $7fec				STA 	SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
+.f94f	9c eb 7f	stz $7feb				STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
 .f952	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
 .f955	9c e2 7f	stz $7fe2				STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
 .f958	a9 08		lda #$08				LDA	#FIFO_RD				;
