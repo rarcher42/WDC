@@ -125,12 +125,9 @@ MONGETL
 INITPARS	
 			STZ	PRM_SIZ			; No known parameter size
 			STZ	EOLFLAG			; No EOL found yet
-			LDA	#>CMDBUF		; Initialize the read pointers
-			STA	CB_RDPTR+1		; High address byte to high pointer byte	
-			STA	PRM_SA+1
-			LDA	#<CMDBUF		; Low address byte to low pointer byte
-			STA	CB_RDPTR
-			STA	PRM_SA			; CB_WRPTR, PRMSA are pointers into CMDBUF e.g. LDA 0,Y/x
+			LDX	#CMDBUF
+			STX	CB_RDPTR		; Start read pointer at start of command buffer
+			STX	PRM_SA			; First parameter starts at command buffer[0]
 			RTS
 
 CLRCMD		
