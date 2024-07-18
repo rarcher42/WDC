@@ -10,12 +10,12 @@
 ;RAW_GETC	=	$E036
 ;RAW_PUTC	= 	$E04B
 
-CTRL_C	= $03
+CTRL_C		= $03
 BS		= $08
 LF		= $0A
 CR		= $0D
 SP		= $20
-DEL     = $7F
+DEL    		 = $7F
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -43,16 +43,11 @@ C_FLAG		= MASK0
         .as     			; A=8 bits
         .xl     			; X, Y = 16 bits
 
-; Direct page fun
-TERMFLAGS = $43
-RDRDY	= $01				; 1 = character waiting
-XONXOFF = $04				; 0 = hardware handshake 1= XON/XOFF
-ECHOOFF = $20
+; Direcct page fun
 
 *=$E0
 
 REC_TYPE	.byte 	?
-DP_START	.byte	?
 PTR_L		.byte	?	; Generic pointer
 PTR_H		.byte	?
 PTR_B		.byte	?
@@ -79,6 +74,7 @@ DATA_CNT	.byte 	?	; Count of record's actual storable data bytes
 FIFO_PIT	.byte	?
 SUBTEMP 	.byte	?	; Any subroutine that doesn't call others can use as local scratchpad space
 HEXASSY		.byte	?
+SRC		.byte	?	; Where did the last character come from?
 
 * = $0400			; Command buffer area
 CMDBUF 		.fill	256	; can be smaller than 256 but must not cross 8 bit page boundary
@@ -101,7 +97,7 @@ HEXIO_B	.byte	?
 HEXIO		=	HEXIO_L				; 24 bit HEX value to print
 
 STACKTOP	=	$7EFF				; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
-* = $F800		
+* = $2000		
 START 	
 			SEI
 			CLC
@@ -111,15 +107,84 @@ START
 			LDX	#STACKTOP
 			TXS
 			JSR	INIT_FIFO
+			JSR	INIT_SER
+			; Bit of a kludge to clean up later.  Send prompt to both 
+			; FIFO and RS232 to be sure recipient gets header
+			STZ	SRC			; First send to FIFO
 			LDY	#QBFMSG			; Start of monitor loop
 			JSR	PUT_STR
+			LDA	#1
+			STA	SRC
+			LDY	#QBFMSG
+			JSR	PUT_STR			; Send out serial port too
+			
 MONGETL		
-			; ECHO TEST BEGIN 		JSR	GET_FIFO
-			; ECHO BACK 			JSR	PUT_FIFO
-			; ECHO TEST END 		BRA	MONGETL
+			JSR	CRLF			; FIXME: send command prompt to both ports 
+			LDA	#'>'			; Should have flag for "both ports", probably.
+			JSR	PUTCHAR			; But as RS232 is so very slow, let's not force too much down this narrow pipe
+			STZ	SRC
+			JSR	CRLF
+			LDA	#'>'
+			JSR	PUTCHAR
 			JSR	GETLINE
 			JSR	PARSELINE
 			BRA	MONGETL			; End of monitor loop
+
+; Check both FIFO and ACIA for incoming.  Set SRC to mark which
+GETCHAR	    		
+			STZ	SRC			; Assume SRC=FIFO
+GETCH_C1
+			JSR 	GET_FRAW		; Check FIFO.  Anything waiting?
+			BCC	GETC_X1			; Yes, return it
+			JSR	GETSER_RAW
+			BCS	GETCH_C1
+			INC	SRC			; SRC = 1 means async serial
+GETC_X1			JSR	TOPUPPER		; Make alphabetics Puppercase
+			RTS
+
+PUTCHAR		
+			PHA
+			LDA	SRC
+			BNE	PUTCHAR_C2
+			PLA
+			JSR	PUT_FIFO
+			BRA	PUTCHAR_X1
+PUTCHAR_C2		
+			PLA
+			JSR	PUT_SER
+PUTCHAR_X1
+			RTS
+
+
+PUTCHARTR	
+			CMP	#$20
+			BCS	PUTCHAR
+			PHA					; Display as hex value
+			LDA	#'\'
+			JSR	PUTCHAR
+			PLA
+			JSR	PUTHEXA
+PUTCRX1		
+			RTS
+
+PUT_STR		
+			LDA	0,Y				; Y points directly to string
+			BEQ	PUTSX
+			JSR	PUTCHAR
+			INY					; point to next character
+			BRA	PUT_STR		
+PUTSX		
+			RTS	
+
+; Show control characters as printable
+PUT_STR_CTRL 
+			LDA	0,Y				; Y points directly to string
+			BEQ	PUTSRX
+			JSR	PUTCHARTR			; Show control characters, etc.
+			INY					; point to next character
+			BRA	PUT_STR_CTRL
+PUTSRX		
+			RTS	
 
 ; Init the parser pointers and counters for parsing a new line
 INITPARS	
@@ -249,9 +314,6 @@ FEDUN1
 ;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
 ; Never omit a raw layer of I/O.  Shame on WDC.  Basic design error locking user into behaviors they don't want.
 GETLINE		
-			JSR	CRLF
-			LDA	#'>'
-			JSR	PUTCHAR
 			JSR	CLRCMD
 GLLP1		
 			JSR	GETCHAR				; Do not echo
@@ -312,6 +374,84 @@ TOPUPPER
 			SBC	#'a'-'A'-1			; Adjust upper case to lower case		
 PUPX1		
 			RTS	
+; FIXME: Quick n'dirty assignments instead of proper definitions of each parameter
+; "ORed" together to build the desired flexible configuration.  We're going
+; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
+;
+
+INTER_CHAR_DLY = 9167	; 8E6 cycles/sec * 11 bits/byte * 1 sec/ 9600 bits = 9167 cycles/byte
+; INTER_CHAR_DLY = INT((CLK_HZ * 11) / BAUD_RATE) + 1
+
+
+SCTL_V  = %00011110       	; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+SCMD_V  = %00001011       	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+; Set up baud rate, parity, stop bits, interrupt control, etc. for
+; the serial port.
+INIT_SER	
+			LDA     #SCTL_V 		; 9600,n,8,1.  rxclock = txclock
+			STA 	ACIA_SCTL		
+			LDA     #SCMD_V 		; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA     ACIA_SCMD
+			LDA     #$80			; Disable all VIA interrupts (not that CPU cares as yet if IRQB=0)		
+                	STA     SYSTEM_VIA_IER
+			LDA	#%00100000		; Put TIMER2 in timed mode
+			TRB	SYSTEM_VIA_ACR
+               		JSR	SET_SERTMR          	; Delay initial char output one character time in case TX not empty 
+			RTS
+
+SET_SERTMR
+			; Set TIMER2  to meter out minimum inter-character delay (and clear IFR.5)
+			PHA
+			LDA     #<INTER_CHAR_DLY	; Load VIA T2 counter with
+                	STA     SYSTEM_VIA_T2C_L        ; one byte output time
+			LDA     #>INTER_CHAR_DLY
+                	STA     SYSTEM_VIA_T2C_H
+			PLA
+			RTS
+			
+; Blocking.  OK for dev but not OK for final
+PUT_SER
+			JSR	PUTSER_RAW
+			BCS	PUT_SER
+			RTS
+; Blocking.  OK for dev but not OK for final
+GET_SER
+			JSR	GETSER_RAW
+			BCS	GET_SER
+			RTS
+
+; Non-blocking get serial byte.  If carry set, nothing was received into A. 
+; If C=0, a new character is waiting in A
+GETSER_RAW		
+			LDA	ACIA_SSR
+			AND	#RX_RDY
+			SEC
+			BEQ	GETSER_X1
+			; RX_RDY=1.  Read waiting character from SDR
+			LDA	ACIA_SDR
+			CLC			; C=0 means A holds new received character
+GETSER_X1
+			RTS
+
+
+
+PUTSER_RAW		
+			PHA
+			JSR	TXCHDLY
+			;LDA	#%001000000			; Bit 5 = IFR.5 = Timer 2 overflow
+			;BIT     SYSTEM_VIA_IFR
+			;SEC					; Still busy outputting last char, so return with C=1 for fail
+			;BEQ	PSR_X1				; be sure to balance stack on exit
+			PLA
+			STA	ACIA_SDR
+			;JSR	SET_SERTMR			; Restart TMR2 for one character time; clear IFR.5
+			CLC					; C=0 means output was successful
+			BRA	PSR_X2				; and return it
+PSR_X1
+			PLA			; retore 
+PSR_X2
+			RTS
+
 
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
@@ -760,56 +900,7 @@ PUTCHARDOT		CMP	#SP
 PCDPRINT		
 			JSR	PUTCHAR
 			RTS
-
-
-PUTCHARTR	
-			CMP	#$20
-			BCS	PUTCHAR
-			PHA					; Display as hex value
-			LDA	#'\'
-			JSR	PUTCHAR
-			PLA
-			JSR	PUTHEXA
-PUTCRX1		
-			RTS
 			
-PUTCHAR		
-			JSR	PUT_FIFO
-			RTS
-
-PUT_STR		
-			LDA	0,Y				; Y points directly to string
-			BEQ	PUTSX
-			JSR	PUTCHAR
-			INY					; point to next character
-			BRA	PUT_STR		
-PUTSX		
-			RTS	
-
-; Show control characters as printable
-PUT_STR_CTRL 
-			LDA	0,Y				; Y points directly to string
-			BEQ	PUTSRX
-			JSR	PUTCHARTR			; Show control characters, etc.
-			INY					; point to next character
-			BRA	PUT_STR_CTRL
-PUTSRX		
-			RTS	
-
-GET_RAW		
-			BRL	GET_FIFO
-
-
-			
-GETCHAR	    
-			LDA	TERMFLAGS		; relying on W265 SBC char in buffer (temporarily) 
-			AND	#%11011111		; Turn off ECHO
-			ORA	#%00010000		; Turn off hardware handshaking to 265 (not run)
-			STA 	TERMFLAGS
-			JSR	GET_RAW
-			JSR	TOPUPPER		; Make alphabetics Puppercase
-			RTS
-
 
 ;-----------------------------------------------------------------------------------
 ; S-record loader 
@@ -1100,41 +1191,6 @@ MKNNH
 			SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
         		AND     #$0F    	; no upper nibble no matter what
         		RTS             	; and return the nibble
-
-; Quick n'dirty assignments instead of proper definitions of each parameter
-; "ORed" together to build the desired flexible configuration.  We're going
-; to run 9600 baud, no parity, 8 data BITs, 1 stop BIT for monitor.  
-;
-
-SCTL_V  = %00011110       ; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
-SCMD_V  = %00001011       ; No parity, no echo, no tx or rx IRQ (for now), DTR*
-; Set up baud rate, parity, stop bits, interrupt control, etc. for
-; the serial port.
-INIT_SER	
-			LDA     #SCTL_V 	; 9600,n,8,1.  rxclock = txclock
-			STA 	SCTL		
-			LDA     #SCMD_V 	; No parity, no echo, no tx or rx IRQ (for now), DTR*
-			STA     SCMD
-			RTS
-
-
-GETSER		
-			LDA	SSR
-			AND	#RX_RDY
-			BEQ	GETSER
-			LDA	SDR
-			CLC			; Temporary compatibility return value for blocking/non-blocking
-			RTS
-
-
-
-PUTSER		
-			PHA
-			STA	SDR
-			JSR	TXCHDLY		; Awful kludge
-			PLA
-			CLC			; Temporary compatibility return value for integration for blocking/non-blocking
-			RTS
 		
 MONTBL		
 			.word 	CMD_A		; Index 0 = "A"

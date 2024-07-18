@@ -1,7 +1,7 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
 ; 64tass -c -L ram.lst --s-record -o ram.hex ram.asm
-; Mon Jul 15 18:56:43 2024
+; Wed Jul 17 17:26:21 2024
 
 ;Offset	;Hex		;Monitor	;Source
 
@@ -63,6 +63,19 @@
 
 ;******  Return to file: ram.asm
 
+
+;******  Processing file: acia_symbols.inc
+
+=$7f80					ACIA_BASE = $7F80		; This is where the 6551 ACIA starts
+=$7f80					ACIA_SDR = ACIA_BASE       		; RX'ed bytes read, TX bytes written, here
+=32641					ACIA_SSR = ACIA_BASE+1     		; Serial data status register
+=32642					ACIA_SCMD = ACIA_BASE+2     		; Serial command reg. ()
+=32643					ACIA_SCTL = ACIA_BASE+3     		; Serial control reg. ()
+=$10					TX_RDY = MASK4
+=$08					RX_RDY = MASK3
+
+;******  Return to file: ram.asm
+
 =3					CTRL_C	= 3
 =10					LF		= 10
 =13					CR		= 13
@@ -85,158 +98,116 @@
 =$01					C_FLAG		= MASK0
 >0080					TEMP2		.byte	?
 =$07eff					STACKTOP    = $07EFF
-.6000					START
-.6000	78		sei					SEI
-.6001	18		clc					CLC
-.6002	fb		xce					XCE
-.6003	c2 18		rep #$18				REP	#(X_FLAG | D_FLAG)
-.6005	e2 20		sep #$20				SEP	#M_FLAG
-.6007	a2 ff 7e	ldx #$7eff				LDX	#STACKTOP
-.600a	9a		txs					TXS
-.600b	20 5b 60	jsr $605b				JSR	INIT_FIFO
-.600e	a0 da 60	ldy #$60da				LDY	#MSG_FOXRAM
-.6011	20 1f 60	jsr $601f				JSR	PUT_STR
-.6014	20 31 60	jsr $6031	POINTLESS	JSR	GET_FIFO
-.6017	c9 03		cmp #$03				CMP	#CTRL_C
-.6019	d0 e5		bne $6000				BNE	START
-.601b	5c 00 f8 00	jml $00f800				JML $00F800
-.601f					PUT_STR
-.601f	b9 00 00	lda $0000,y				LDA	0,Y				; Y points directly to string
-.6022	f0 06		beq $602a				BEQ	PUTSX
-.6024	20 2b 60	jsr $602b				JSR	PUT_FIFO
-.6027	c8		iny					INY						; point to next character
-.6028	80 f5		bra $601f				BRA	PUT_STR
-.602a					PUTSX
-.602a	60		rts					RTS
-=$01					FIFO_TXE = PB0
-=$02					FIFO_RXF = PB1
-=$04					FIFO_WR = PB2
-=$08					FIFO_RD = PB3
-=$20					FIFO_PWREN = PB5
-=$80					FIFO_DEBUG = PB7		; Handy debug toggle output free for any use
-.602b					PUT_FIFO
-.602b	20 83 60	jsr $6083				JSR	PUT_FRAW
-.602e	b0 fb		bcs $602b				BCS	PUT_FIFO
-.6030	60		rts					RTS
-.6031	20 ad 60	jsr $60ad	GET_FIFO	JSR GET_FRAW
-.6034	b0 fb		bcs $6031				BCS	GET_FIFO
-.6036	60		rts					RTS
-.6037					SEL_BANK3
-.6037	a9 ff		lda #$ff				LDA	#%11111111
-.6039	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
-.603c	60		rts					RTS
-.603d					SEL_BANK2
-.603d	a9 fd		lda #$fd				LDA	#%11111101
-.603f	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
-.6042	60		rts					RTS
-.6043					SEL_BANK1
-.6043	a9 df		lda #$df				LDA	#%11011111
-.6045	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
-.6048	60		rts					RTS
-.6049					SEL_BANK0
-.6049	a9 dd		lda #$dd				LDA	#%11011101
-.604b	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
-.604e	60		rts					RTS
-.604f					INIT_SYSVIA
-.604f	a9 ff		lda #$ff				LDA	#%11111111
-.6051	8d ec 7f	sta $7fec				STA	SYSTEM_VIA_PCR
-.6054	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA
-.6057	9c e2 7f	stz $7fe2				STZ	SYSTEM_VIA_DDRB
-.605a	60		rts					RTS
-.605b					INIT_FIFO
-.605b	a9 ff		lda #$ff				LDA	#$FF
-.605d	8d ec 7f	sta $7fec				STA SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
-.6060	9c eb 7f	stz $7feb				STZ SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
-.6063	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
-.6066	9c e2 7f	stz $7fe2				STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
-.6069	a9 08		lda #$08				LDA	#FIFO_RD				;
-.606b	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; Avoid possible glitch by writing to output latch while Port B is still an input (after reset)
-.606e	a9 8c		lda #$8c				LDA	#(FIFO_RD + FIFO_WR + FIFO_DEBUG)	; Make FIFO RD & WR pins outputs so we can strobe data in and out of the FIFO
-.6070	8d e2 7f	sta $7fe2				STA	SYSTEM_VIA_DDRB			; Port B: PB2 and PB3 are outputs; rest are inputs from earlier IORB write
-.6073	20 ce 60	jsr $60ce				JSR	TXCHDLY
-.6076	20 ce 60	jsr $60ce				JSR	TXCHDLY
-.6079	20 ce 60	jsr $60ce				JSR	TXCHDLY
-.607c	20 ce 60	jsr $60ce				JSR	TXCHDLY
-.607f	20 ce 60	jsr $60ce				JSR	TXCHDLY
-.6082	60		rts					RTS					; FUBAR - don't wait on the FIFO which stupidly may not even have power if not USB powered
-.6083					PUT_FRAW
-.6083	85 80		sta $80					STA	TEMP2
-.6085	ad e0 7f	lda $7fe0				LDA	SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
-.6088	29 01		and #$01				AND	#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
-.608a	38		sec					SEC							; FIFO is full, so don't try to queue it!
-.608b	d0 1d		bne $60aa				BNE	OFX1					; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
-.608d					OFCONT
-.608d	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating
-.6090	a9 0c		lda #$0c				LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
-.6092	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
-.6095	a5 80		lda $80					LDA TEMP2							; Restore the data to send
-.6097	8d e1 7f	sta $7fe1				STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet)
-.609a	a9 ff		lda #$ff				LDA	#$FF				; make Port A all outputs with stable output value already set in prior lines
-.609c	8d e3 7f	sta $7fe3				STA	SYSTEM_VIA_DDRA			; Save data to output latches
-.609f	ea		nop					NOP					; Some settling time of data output just to be safe
-.60a0	a9 08		lda #$08				LDA	#(FIFO_RD)			; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
-.60a2	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; Low-going WR pulse should latch data
-.60a5	ea		nop					NOP							; Hold time following write strobe, to ensure value is latched OK
-.60a6	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; Make port A an input again
-.60a9	18		clc					CLC					; signal success of write to caller
-.60aa					OFX1
-.60aa	a5 80		lda $80					LDA	TEMP2
-.60ac	60		rts					RTS
-.60ad					GET_FRAW
-.60ad	ad e0 7f	lda $7fe0				LDA	SYSTEM_VIA_IORB			; Check RXF flag
-.60b0	29 02		and #$02				AND	#FIFO_RXF			; If clear, we're OK to read.  If set, there's no data waiting
-.60b2	38		sec					SEC
-.60b3	d0 18		bne $60cd				BNE 	INFXIT				; If RXF is 1, then no character is waiting!
-.60b5	9c e3 7f	stz $7fe3				STZ	SYSTEM_VIA_DDRA			; Make Port A inputs
-.60b8	a9 08		lda #$08				LDA	#FIFO_RD
-.60ba	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB			; RD=1 WR=0 (RD must go to 0 to read
-.60bd	ea		nop					NOP
-.60be	9c e0 7f	stz $7fe0				STZ	SYSTEM_VIA_IORB			; RD=0 WR=0	- FIFO presents data to port A
-.60c1	ea		nop					NOP
-.60c2	ad e1 7f	lda $7fe1				LDA	SYSTEM_VIA_IORA			; read data in
-.60c5	48		pha					PHA
-.60c6	a9 08		lda #$08				LDA	#FIFO_RD			; Restore back to inactive signals RD=1 and WR=0
-.60c8	8d e0 7f	sta $7fe0				STA	SYSTEM_VIA_IORB
-.60cb	68		pla					PLA
-.60cc	18		clc					CLC					; we got a byte!
-.60cd					INFXIT
-.60cd	60		rts					RTS
+.2000					START
+.2000	78		sei					SEI
+.2001	18		clc					CLC
+.2002	fb		xce					XCE
+.2003	c2 18		rep #$18				REP	#(X_FLAG | D_FLAG)
+.2005	e2 20		sep #$20				SEP	#M_FLAG
+.2007	a2 ff 7e	ldx #$7eff				LDX	#STACKTOP
+.200a	9a		txs					TXS
+.200b	20 2b 20	jsr $202b				JSR	INIT_SER
+.200e	a0 82 20	ldy #$2082				LDY	#MSG_FOXRAM
+.2011	20 1f 20	jsr $201f				JSR	PUT_STR
+.2014					POINTLESS
+.2014	20 56 20	jsr $2056				JSR	GET_SER
+.2017	c9 03		cmp #$03				CMP	#CTRL_C
+.2019	d0 e5		bne $2000				BNE	START
+.201b	5c 00 f8 00	jml $00f800				JML 	$00F800
+.201f					PUT_STR
+.201f	b9 00 00	lda $0000,y				LDA	0,Y				; Y points directly to string
+.2022	f0 06		beq $202a				BEQ	PUTSX
+.2024	20 50 20	jsr $2050				JSR	PUT_SER
+.2027	c8		iny					INY					; point to next character
+.2028	80 f5		bra $201f				BRA	PUT_STR
+.202a					PUTSX
+.202a	60		rts					RTS
+=9167					INTER_CHAR_DLY = 9167	; 8E6 cycles/sec * 11 bits/byte * 1 sec/ 9600 bits = 9167 cycles/byte
+=$1e					SCTL_V  = %00011110       	; 9600 baud, 8 bits, 1 stop bit, rxclock = txclock
+=$0b					SCMD_V  = %00001011       	; No parity, no echo, no tx or rx IRQ (for now), DTR*
+.202b					INIT_SER
+.202b	a9 1e		lda #$1e				LDA     #SCTL_V 		; 9600,n,8,1.  rxclock = txclock
+.202d	8d 83 7f	sta $7f83				STA 	ACIA_SCTL
+.2030	a9 0b		lda #$0b				LDA     #SCMD_V 		; No parity, no echo, no tx or rx IRQ (for now), DTR*
+.2032	8d 82 7f	sta $7f82				STA     ACIA_SCMD
+.2035	a9 80		lda #$80				LDA     #$80			; Disable all VIA interrupts (not that CPU cares as yet if IRQB=0)
+.2037	8d ee 7f	sta $7fee	                	STA     SYSTEM_VIA_IER
+.203a	a9 20		lda #$20				LDA	#%00100000		; Put TIMER2 in timed mode
+.203c	1c eb 7f	trb $7feb				TRB	SYSTEM_VIA_ACR
+.203f	20 43 20	jsr $2043	               		JSR	SET_SERTMR          	; Delay initial char output one character time in case TX not empty
+.2042	60		rts					RTS
+.2043					SET_SERTMR
+.2043	48		pha					PHA
+.2044	a9 cf		lda #$cf				LDA     #<INTER_CHAR_DLY	; Load VIA T2 counter with
+.2046	8d e8 7f	sta $7fe8	                	STA     SYSTEM_VIA_T2C_L        ; one byte output time
+.2049	a9 23		lda #$23				LDA     #>INTER_CHAR_DLY
+.204b	8d e9 7f	sta $7fe9	                	STA     SYSTEM_VIA_T2C_H
+.204e	68		pla					PLA
+.204f	60		rts					RTS
+.2050					PUT_SER
+.2050	20 69 20	jsr $2069				JSR	PUTSER_RAW
+.2053	b0 fb		bcs $2050				BCS	PUT_SER
+.2055	60		rts					RTS
+.2056					GET_SER
+.2056	20 5c 20	jsr $205c				JSR	GETSER_RAW
+.2059	b0 fb		bcs $2056				BCS	GET_SER
+.205b	60		rts					RTS
+.205c					GETSER_RAW
+.205c	ad 81 7f	lda $7f81				LDA	ACIA_SSR
+.205f	29 08		and #$08				AND	#RX_RDY
+.2061	38		sec					SEC
+.2062	f0 04		beq $2068				BEQ	GETSER_X1
+.2064	ad 80 7f	lda $7f80				LDA	ACIA_SDR
+.2067	18		clc					CLC			; C=0 means A holds new received character
+.2068					GETSER_X1
+.2068	60		rts					RTS
+.2069					PUTSER_RAW
+.2069	48		pha					PHA
+.206a	20 76 20	jsr $2076				JSR	TXCHDLY
+.206d	68		pla					PLA
+.206e	8d 80 7f	sta $7f80				STA	ACIA_SDR
+.2071	18		clc					CLC					; C=0 means output was successful
+.2072	80 01		bra $2075				BRA	PSR_X2				; and return it
+.2074					PSR_X1
+.2074	68		pla					PLA			; retore
+.2075					PSR_X2
+.2075	60		rts					RTS
 =$0940					TX_DLY_CYCLES = $0940						; Not tuned.  As it's temporary, optimum settings are unimportant.
-.60ce					TXCHDLY
-.60ce	5a		phy					PHY
-.60cf	a0 40 09	ldy #$0940				LDY	#TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
-.60d2					DLY_Y
-.60d2	88		dey					DEY
-.60d3	ea		nop					NOP
-.60d4	ea		nop					NOP
-.60d5	ea		nop					NOP
-.60d6	d0 fa		bne $60d2				BNE	DLY_Y
-.60d8	7a		ply					PLY
-.60d9	60		rts					RTS
-.60da					MSG_FOXRAM
->60da	0d 0d					.text 	CR,CR
->60dc	20 20 20 20 20 20 20 20			.text	"        I YAM RUNNING INDA RAM!",CR,LF
->60e4	49 20 59 41 4d 20 52 55 4e 4e 49 4e 47 20 49 4e
->60f4	44 41 20 52 41 4d 21 0d 0a
->60fd	20 20 20 20 20 20 20 20		 	.text	"        _,-=._              /|_/|",CR,LF
->6105	5f 2c 2d 3d 2e 5f 20 20 20 20 20 20 20 20 20 20
->6115	20 20 20 20 2f 7c 5f 2f 7c 0d 0a
->6120	20 20 20 20 20 20 20 2a		 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR,LF
->6128	2d 2e 7d 20 20 20 60 3d 2e 5f 2c 2e 2d 3d 2d 2e
->6138	5f 2e 2c 20 20 40 20 40 2e 5f 2c 0d 0a
->6145	20 20 20 20 20 20 20 20		 	.text   "          `._ _,-.   )      _,.-'",CR,LF
->614d	20 20 60 2e 5f 20 5f 2c 2d 2e 20 20 20 29 20 20
->615d	20 20 20 20 5f 2c 2e 2d 27 0d 0a
->6168	20 20 20 20 20 20 20 20		    .text   "             `    G.m-'^m'm'",CR,LF
->6170	20 20 20 20 20 60 20 20 20 20 47 2e 6d 2d 27 5e
->6180	6d 27 6d 27 0d 0a
->6186	20 20 20 20 20 20 20 20			.text   "          Foxy art by: Dmytro O. Redchuk",CR,LF
->618e	20 20 46 6f 78 79 20 61 72 74 20 62 79 3a 20 44
->619e	6d 79 74 72 6f 20 4f 2e 20 52 65 64 63 68 75 6b
->61ae	0d 0a
->61b0	20 43 54 52 4c 2d 43 20			.text   " CTRL-C to return to FuzzyMonitoster",CR,LF,CR,LF
->61b8	74 6f 20 72 65 74 75 72 6e 20 74 6f 20 46 75 7a
->61c8	7a 79 4d 6f 6e 69 74 6f 73 74 65 72 0d 0a 0d 0a
->61d8	00				    .text	0
+.2076					TXCHDLY
+.2076	5a		phy					PHY
+.2077	a0 40 09	ldy #$0940				LDY	#TX_DLY_CYCLES		; FIXME: Very bad work-around until timers are up
+.207a					DLY_Y
+.207a	88		dey					DEY
+.207b	ea		nop					NOP
+.207c	ea		nop					NOP
+.207d	ea		nop					NOP
+.207e	d0 fa		bne $207a				BNE	DLY_Y
+.2080	7a		ply					PLY
+.2081	60		rts					RTS
+.2082					MSG_FOXRAM
+>2082	0d 0d					.text 	CR,CR
+>2084	20 20 20 20 20 20 20 20			.text	"        I YAM RUNNING INDA RAM!",CR,LF
+>208c	49 20 59 41 4d 20 52 55 4e 4e 49 4e 47 20 49 4e
+>209c	44 41 20 52 41 4d 21 0d 0a
+>20a5	20 20 20 20 20 20 20 20		 	.text	"        _,-=._              /|_/|",CR,LF
+>20ad	5f 2c 2d 3d 2e 5f 20 20 20 20 20 20 20 20 20 20
+>20bd	20 20 20 20 2f 7c 5f 2f 7c 0d 0a
+>20c8	20 20 20 20 20 20 20 2a		 	.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR,LF
+>20d0	2d 2e 7d 20 20 20 60 3d 2e 5f 2c 2e 2d 3d 2d 2e
+>20e0	5f 2e 2c 20 20 40 20 40 2e 5f 2c 0d 0a
+>20ed	20 20 20 20 20 20 20 20		 	.text   "          `._ _,-.   )      _,.-'",CR,LF
+>20f5	20 20 60 2e 5f 20 5f 2c 2d 2e 20 20 20 29 20 20
+>2105	20 20 20 20 5f 2c 2e 2d 27 0d 0a
+>2110	20 20 20 20 20 20 20 20		    .text   "             `    G.m-'^m'm'",CR,LF
+>2118	20 20 20 20 20 60 20 20 20 20 47 2e 6d 2d 27 5e
+>2128	6d 27 6d 27 0d 0a
+>212e	20 20 20 20 20 20 20 20			.text   "          Foxy art by: Dmytro O. Redchuk",CR,LF
+>2136	20 20 46 6f 78 79 20 61 72 74 20 62 79 3a 20 44
+>2146	6d 79 74 72 6f 20 4f 2e 20 52 65 64 63 68 75 6b
+>2156	0d 0a
+>2158	20 43 54 52 4c 2d 43 20			.text   " CTRL-C to return to FuzzyMonitoster",CR,LF,CR,LF
+>2160	74 6f 20 72 65 74 75 72 6e 20 74 6f 20 46 75 7a
+>2170	7a 79 4d 6f 6e 69 74 6f 73 74 65 72 0d 0a 0d 0a
+>2180	00				    .text	0
 
 ;******  End of listing
