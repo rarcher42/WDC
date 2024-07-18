@@ -1,6 +1,6 @@
 
 ; 64tass Turbo Assembler Macro V1.59.3120 listing file
-; 64tass -c -L monitor.lst --s-record -o monitor.hex monitor.asm
+; 64tass -c -L monitor.lst --intel-hex -o monitor.hex monitor.asm
 ; Wed Jul 17 18:51:08 2024
 
 ;Offset	;Hex		;Monitor	;Source
