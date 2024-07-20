@@ -2,7 +2,12 @@
 ; Assembled with 64TASS
 ; 		64tass -c bootloader.asm -L bootloader.lst
 ; 
+; Put the above equates into an included file per peripheral or board
 
+        .cpu    "65816"
+        .as     			; A=8 bits
+        .xl     			; X, Y = 16 bits
+		
 .INCLUDE	"via_symbols.inc"
 .INCLUDE	"acia_symbols.inc"
 
@@ -10,12 +15,12 @@
 ;RAW_GETC	=	$E036
 ;RAW_PUTC	= 	$E04B
 
-CTRL_C		= $03
+CTRL_C	= $03
 BS		= $08
 LF		= $0A
 CR		= $0D
 SP		= $20
-DEL    		 = $7F
+DEL    	= $7F
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -35,13 +40,6 @@ D_FLAG		= MASK3
 I_FLAG		= MASK2
 Z_FLAG		= MASK1
 C_FLAG		= MASK0
-
-
-; Put the above equates into an included file per peripheral or board
-
-        .cpu    "65816"
-        .as     			; A=8 bits
-        .xl     			; X, Y = 16 bits
 
 ; Direcct page fun
 
@@ -81,8 +79,8 @@ CMDBUF 		.fill	256	; can be smaller than 256 but must not cross 8 bit page bound
 				; because we use 8 bit math to determine stuff and nobody will
 				; want to type a command longer than 256 characters in any case
 ; Read and write pointers into command buffer
-CB_RDPTR	.word	?	; Use LDA/STA 0,X typically
-CB_WRPTR	.word 	?	; Use LAD/STA 0,Y typically
+CB_RDPTR	.word	?	; 16 bits
+CB_WRPTR	.word 	?	; MSByte is always $00.  Waste 1 byte of RAM to avoid two mode changes of X flag
 ; Parameter metadata
 PRM_SA	.word	?		; Parameter start address
 PRM_SIZ	.byte	?		; Size of current parameter		
@@ -127,6 +125,14 @@ MONGETL
 			LDA	#'>'
 			JSR	PUTCHAR
 			JSR	GETLINE
+			JSR	CRLF
+			LDA	#'"'
+			JSR	PUTCHAR
+			LDY	#CMDBUF
+			JSR	PUT_STR
+			LDA	#'"'
+			JSR	PUTCHAR
+			JSR	CRLF
 			JSR	PARSELINE
 			BRA	MONGETL			; End of monitor loop
 
@@ -134,12 +140,13 @@ MONGETL
 GETCHAR	    		
 			STZ	SRC			; Assume SRC=FIFO
 GETCH_C1
-			JSR 	GET_FRAW		; Check FIFO.  Anything waiting?
+			JSR GET_FRAW		; Check FIFO.  Anything waiting?
 			BCC	GETC_X1			; Yes, return it
 			JSR	GETSER_RAW
 			BCS	GETCH_C1
 			INC	SRC			; SRC = 1 means async serial
-GETC_X1			JSR	TOPUPPER		; Make alphabetics Puppercase
+GETC_X1			
+			JSR	TOPUPPER		; Make alphabetics Puppercase
 			RTS
 
 PUTCHAR		
@@ -195,12 +202,76 @@ INITPARS
 			STX	PRM_SA			; First parameter starts at command buffer[0]
 			RTS
 
-CLRCMD		
-			LDX	#CMDBUF			; Point CB_WRPTR to start of command buffer
-			STX	CB_WRPTR
-			STZ	CMDBUF			; Null terminate the empty buffer
+CLRCMD	
+			LDX	#$0000			; Not to worry; we want x = 0 where using this
+			STX	CB_WRPTR		; Upper byte is 0 but we want 16 bit X to load/store to avoid setting/restoring X flag
+			STZ	CMDBUF			; Pre-emptively null terminate the empty buffer
 			RTS
-	
+
+;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
+; Never omit a raw layer of I/O.  Shame on WDC.  Basic design error locking user into behaviors they don't want.
+MAXLINE 	= 		132			; MAXLINE should be $FE or less
+GETLINE		
+			JSR	CLRCMD
+			; Side effect of CLRCMD is setting X to $0000
+GLNEXT		CPX #MAXLINE		; Maxline must be $FE or lower
+			BCS	CTL_C			; Sorry, too long!  Abort the line as it's obvious nonsense
+			JSR	GETCHAR			; No echo
+			; Handle CR and CTRL-C
+			CMP	#CR
+			BNE GLCHKCC
+			; CR handling
+			JSR	PUTCHAR
+			BRA	GLXIT1
+GLCHKCC	
+			; Handle various control characters prior to final filter discarding them
+			CMP	#CTRL_C
+			BNE	GLCHKBS
+			; CTRL-C handler
+CTL_C 
+			LDA	#'^'
+			JSR	PUTCHAR
+			LDA	#'C'
+			JSR	PUTCHAR
+			LDA	#CR
+			JSR	PUTCHAR
+			JSR	CLRCMD				; zotch out any command in buffer
+			BRA	GLXIT1			
+GLCHKBS
+			; Handle backspace/del logic (currently identical)
+			CMP	#BS				; We will not tolerate BS here
+			BEQ	GL_DEL
+			CMP	#DEL
+			BNE	GLNC1			; Neither BS or DEL, continue search
+GL_DEL			
+			; Handle backspace
+			CPX	#0				; Special case: do not print BS if we're at start of buffer
+			BEQ	GLNEXT			; Do nothing for BS/DEL in empty buffer
+			DEX	
+			LDA	#BS				; Now back over the character
+								; Note: this is a humane algorithm, because
+								; we euthanized the character BEFORE backing over it.
+			JSR	PUTCHAR			; print the backspace
+			LDA	#SP
+			JSR	PUTCHAR
+			LDA	#BS
+			JSR	PUTCHAR
+			; pointing to the next available so decrement
+			STZ CMDBUF,X		; Overwrite backed-over character with NULL
+			BRA	GLNEXT			; 
+GLNC1		
+			CMP	#SP
+			BCC	GLNEXT			; If not yet handled and < SP, ignore $00-$1F
+			; Store the character
+			STA	CMDBUF,X		; store it
+			INX					; point to next free location
+			JSR	PUTCHAR
+			STZ	CMDBUF,X		; Null-terminate new blank spot
+			BRA	GLNEXT
+GLXIT1		
+			STX	CB_WRPTR
+			RTS
+			
 ; Look in the CMDBUF and dispatch to appropriate command. 	
 PARSELINE	
 			JSR	INITPARS
@@ -311,59 +382,6 @@ FEDUN1
 			RTS
 			
 
-;--- Get command line.  Imperfect editor, due to no raw get character capability in W265 monitor.  Silly, inflexible omission.
-; Never omit a raw layer of I/O.  Shame on WDC.  Basic design error locking user into behaviors they don't want.
-GETLINE		
-			JSR	CLRCMD
-GLLP1		
-			JSR	GETCHAR				; Do not echo
-			CMP	#CR
-			BNE	GLNC0
-			JSR	PUTCHAR
-			BRA	GLXIT1				; end of message
-GLNC0		
-			CMP	#CTRL_C
-			BNE	GLNC1
-			; CTRL-C handler
-			LDA	#'^'
-			JSR	PUTCHAR
-			LDA	#'C'
-			JSR	PUTCHAR
-			LDA	#CR
-			JSR	PUTCHAR
-			JSR	CLRCMD				; zotch out any command in buffer
-			BRA	GLXIT1
-			; CTRL-C
-GLNC1		
-			CMP	#LF
-			BNE	GLNC2
-			; LF handler
-			BRA	GLLP1
-			; LF
-GLNC2		
-			CMP	#BS				; We will not tolerate BS here
-			BNE	GLNC9
-			CMP	#DEL	
-			BNE	GLNC9
-			; Handle backspace
-			STZ	0,X
-			CPX	#CMDBUF
-			BEQ	GLLP1				; Already backed over the first character. No index to decrement
-			JSR	PUTCHAR
-			DEX					; change buffer pointer
-			STX	CB_WRPTR
-			STZ	0,X				; Character we backed over is now end of string
-			BRA	GLLP1
-			; enougs BS (backspace)
-GLNC9		
-			STA	0,X				; store it
-			JSR	PUTCHAR
-			INX
-			STX	CB_WRPTR
-			BRA	GLLP1
-GLXIT1		
-			STZ	0,X				; null-terminate the line
-			RTS
 			
 TOPUPPER	
 			CMP	#'a'				; Make character PupperCase
@@ -438,7 +456,7 @@ GETSER_X1
 PUTSER_RAW		
 			PHA
 			JSR	TXCHDLY
-			;LDA	#%001000000			; Bit 5 = IFR.5 = Timer 2 overflow
+			;LDA #%001000000			; Bit 5 = IFR.5 = Timer 2 overflow
 			;BIT     SYSTEM_VIA_IFR
 			;SEC					; Still busy outputting last char, so return with C=1 for fail
 			;BEQ	PSR_X1				; be sure to balance stack on exit
@@ -495,7 +513,7 @@ PUT_FIFO
 			RTS
 			
 GET_FIFO	
-			JSR 	GET_FRAW
+			JSR GET_FRAW
 			BCS	GET_FIFO
 			RTS
 			
@@ -531,8 +549,8 @@ INIT_SYSVIA
 ; NOTE:  Kludge delay until timer because if powered by RS232 not USB, the FIFO will never report power enable signal and we'll hang forever.	
 INIT_FIFO
 			LDA	#$FF
-			STA 	SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
-			STZ 	SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
+			STA SYSTEM_VIA_PCR			; CB2=FAMS=flash A16=1;  CA2=FA15=A15=1; Select flash Bank #3
+			STZ SYSTEM_VIA_ACR			; Disable PB7, shift register, timer T1 interrupt.  Not absolutely required while interrupts are disabled FIXME: set up timer
 			STZ	SYSTEM_VIA_DDRA			; Set PA0-PA7 to all inputs
 			STZ	SYSTEM_VIA_DDRB			; In case we're not coming off a reset, make PORT B an input and change output register when it's NOT outputting
 			LDA	#FIFO_RD				;
@@ -560,17 +578,17 @@ OFCONT
 			STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
 			LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 			STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
-			LDA 	FIFO_PIT			; Restore the data to send
+			LDA FIFO_PIT				; Restore the data to send
 			STA	SYSTEM_VIA_IORA			; Set up output value in advance in Port A (still input so doesn't go out yet) 
-			LDA	#$FF				; make Port A all outputs with stable output value already set in prior lines
+			LDA	#$FF					; make Port A all outputs with stable output value already set in prior lines
 			STA	SYSTEM_VIA_DDRA			; Save data to output latches
-			NOP					; Some settling time of data output just to be safe
+			NOP							; Some settling time of data output just to be safe
 			; Now the data's stable on PA0-7, pull WR line low (leave RD high)
-			LDA	#(FIFO_RD)			; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
+			LDA	#(FIFO_RD)				; RD=1 WR=0 (WR1->0 transition triggers FIFO transfer!)
 			STA	SYSTEM_VIA_IORB			; Low-going WR pulse should latch data
 			NOP							; Hold time following write strobe, to ensure value is latched OK
 			STZ	SYSTEM_VIA_DDRA			; Make port A an input again
-			CLC					; signal success of write to caller
+			CLC							; signal success of write to caller
 OFX1	
 			LDA	FIFO_PIT
 			RTS
@@ -582,9 +600,9 @@ OFX1
 ; If carry flag is set, no character was received and A doesn't contain anything meaningful
 GET_FRAW	
 			LDA	SYSTEM_VIA_IORB			; Check RXF flag
-			AND	#FIFO_RXF			; If clear, we're OK to read.  If set, there's no data waiting
+			AND	#FIFO_RXF				; If clear, we're OK to read.  If set, there's no data waiting
 			SEC
-			BNE 	INFXIT				; If RXF is 1, then no character is waiting!
+			BNE INFXIT				; If RXF is 1, then no character is waiting!
 			STZ	SYSTEM_VIA_DDRA			; Make Port A inputs
 			LDA	#FIFO_RD
 			STA	SYSTEM_VIA_IORB			; RD=1 WR=0 (RD must go to 0 to read
@@ -756,7 +774,7 @@ DUMPITN1
 			JSR	INC_SA24		; Next source address
 DHEXC3		
 			JSR	DEC_CTR24
-			INC 	BYTECNT
+			INC BYTECNT
 			LDA	BYTECNT
 			CMP	#16
 			BNE	DUMPITNOW
@@ -866,35 +884,14 @@ JUSTCR
 			RTS
 
 ; FIXME: implement commands here		
-CMD_A					
-CMD_B		
-CMD_C		
-CMD_D		
-CMD_E			
-CMD_F				
-CMD_H				
-CMD_I		
-CMD_J					
-CMD_K		
-CMD_M					
-CMD_N		
-CMD_O		
-CMD_P		
-CMD_Q		
-CMD_R		
-CMD_S		
-CMD_T					
-CMD_U		
-CMD_V					
-CMD_X		
-CMD_Y		
-CMD_Z		
+CMD_UNIMPLEMENTED					
 			LDY	#MSG_UNIMPLEMENTED
 			JSR	PUT_STR
 			RTS		
 					
 
-PUTCHARDOT		CMP	#SP
+PUTCHARDOT		
+			CMP	#SP
 			BCS	PCDPRINT
 			LDA	#'.'
 PCDPRINT		
@@ -1116,7 +1113,7 @@ CVHKWIT
 
 ; Basic conversions	
 GETHEX  
-			JSR 	GETCHAR
+			JSR GETCHAR
 			CMP	#CTRL_C
 			BNE	GHECC1
 			LDA	#'^'
@@ -1125,25 +1122,25 @@ GETHEX
 			JSR	PUTCHAR
        		RTS				; bail
 GHECC1	
-			JSR     MKNIBL  		; Convert to 0..F numeric
-			ASL     A
-			ASL     A
-			ASL     A
-			ASL     A       		; This is the upper nibble
-			AND     #$F0
-			STA     SUBTEMP
-			JSR     GETCHAR
+			JSR	MKNIBL  		; Convert to 0..F numeric
+			ASL A
+			ASL A
+			ASL A
+			ASL A       		; This is the upper nibble
+			AND #$F0
+			STA SUBTEMP
+			JSR GETCHAR
 			CMP	#CTRL_C
 			BNE	GHECC2
 			LDA	#'^'
 			JSR	PUTCHAR
 			LDA	#'C'
 			JSR	PUTCHAR
-			RTS				; bail
+			RTS	
 GHECC2	
-			JSR     MKNIBL
-        		ORA    	SUBTEMP
-        		RTS
+			JSR MKNIBL
+        	ORA SUBTEMP
+        	RTS
 ;----------------    
 
 ; Print 8 to 24 bit values in HEXIO_B, HEXIO_H, HEXIO_L buffer as this is very commonly needed
@@ -1162,17 +1159,17 @@ PUTHEX8:
 	
 PUTHEXA  	
 			PHA             	;
-        		LSR 	A
-        		LSR 	A
-			LSR 	A
-			LSR 	A
-        		JSR     PRNIBL	
-        		PLA
+        	LSR A
+        	LSR A
+			LSR A
+			LSR A
+        	JSR PRNIBL	
+        	PLA
 PRNIBL  	
 			AND     #$0F    	; strip off the low nibble
-       		 	CMP     #$0A
-       		 	BCC  	NOTHEX  	; if it's 0-9, add '0' else also add 7
-       		 	ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
+			CMP     #$0A
+			BCC  	NOTHEX  	; if it's 0-9, add '0' else also add 7
+			ADC     #6      	; Add 7 (6+carry=1), result will be carry clear
 NOTHEX  	
 			ADC     #'0'    	; If carry clear, we're 0-9
 ; Write the character in A as ASCII:
@@ -1184,87 +1181,83 @@ PUTCH
 ; Convert the ASCII nibble to numeric value from 0-F:
 MKNIBL  	
 			CMP     #'9'+1  	; See if it's 0-9 or 'A'..'F' (no lowercase yet)	
- 		    BCC     MKNNH   	; If we borrowed, we lost the carry so 0..9
-        		SBC     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
-        		; If we fall through, carry is set unlike direct entry at MKNNH
+			BCC     MKNNH   	; If we borrowed, we lost the carry so 0..9
+			SBC     #7+1    	; Subtract off extra 7 (sbc subtracts off one less)
+        	; If we fall through, carry is set unlike direct entry at MKNNH
 MKNNH   	
 			SBC     #'0'-1  	; subtract off '0' (if carry clear coming in)
-        		AND     #$0F    	; no upper nibble no matter what
-        		RTS             	; and return the nibble
-		
-MONTBL		
-			.word 	CMD_A		; Index 0 = "A"
-			.word	CMD_B
-			.word	CMD_C
-			.word	CMD_D
-			.word	CMD_E
-			.word	CMD_F
-			.word	CMD_GO
-			.word	CMD_H
-			.word	CMD_I
-			.word	CMD_GO
-			.word	CMD_K
-			.word	CMD_LOAD
-			.word	CMD_M
-			.word	CMD_N
-			.word	CMD_O
-			.word	CMD_P
-			.word	CMD_Q
-			.word	CMD_DUMPHEX
-			.word	CMD_S
-			.word	CMD_T
-			.word	CMD_U
-			.word	CMD_V
-			.word	CMD_WRITEBYTES
-			.word	CMD_X
-			.word	CMD_Y
-			.word	CMD_Z
-			;			
-			
+        	AND     #$0F    	; no upper nibble no matter what
+        	RTS             	; and return the nibble
+
 * = $F000
+MONTBL		
+			.word 	CMD_UNIMPLEMENTED		; Index 0 = "A"
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_GO
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_GO
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_LOAD
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_DUMPHEX
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_WRITEBYTES
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED
+			.word	CMD_UNIMPLEMENTED				
 
 MSG_UNIMPLEMENTED
-		.text	CR,"Unimplemented instruction",CR
-		.text	0
+			.text	CR,"Unimplemented instruction",CR
+			.text	0
 
 	
 MSG_6HEX	
-		.text	CR,"Enter 6 digit hex address:",0
+			.text	CR,"Enter 6 digit hex address:",0
 	
 MSG_CONFIRM
-		.text	CR,"Is this correct (Y/x)?:",0
+			.text	CR,"Is this correct (Y/x)?:",0
 
 QBFMSG	
-		.text 		CR,LF,CR,LF
-		.text	"                  VCBmon v 1.00",CR,LF
-		.text 	"          ******************************",CR,LF
-		.text 	"          *                            *",CR,LF
-		.text 	"          *    The Quick brown Dog     *",CR,LF
-		.text 	"          *  Jumps over the Lazy Fox!  *",CR,LF
-		.text 	"          *                            *",CR,LF
-		.text 	"          ******************************",CR,LF
+			.text 		CR,LF,CR,LF
+			.text	"                 LOLmon v0.1",CR,LF
+			.text 	"          ******************************",CR,LF
+			.text 	"          *    The Quick brown Dog     *",CR,LF
+			.text 	"          *  Jumps over the Lazy Fox!  *",CR,LF
+			.text 	"          ******************************",CR,LF
 
 PROMPT	
-		.text	CR,LF
-		.text	"        _,-=._              /|_/|",CR,LF
- 		.text	"       *-.}   `=._,.-=-._.,  @ @._,",CR,LF
- 		.text   "          `._ _,-.   )      _,.-'",CR,LF
-		 .text   "             `    G.m-'^m'm'",CR,CR,LF
-   		 .text	0
+			.text	CR,LF
+			.text	"        _,-=._              /|_/|",CR,LF
+			.text	"       *-.}   `=._,.-=-._.,  @ @.>",CR,LF
+			.text   "          `._ _,-.   )      _,.-'",CR,LF
+			.text   "             `    V.v-'^V''v",CR,CR,LF
+			.text	0
 	
 ANYKEY	
-		.text	CR,LF,CR,LF
-		.text 	"Press the ANY key (CTRL-C) to return to monitor",CR
-		.text   "else continue foxing:"
-		.text	0
+			.text	CR,LF,CR,LF
+			.text 	"Press the ANY key (CTRL-C) to return to monitor",CR
+			.text   "else continue foxing:"
+			.text	0
 
 MSG_LOAD
-		.text 	CR,"SEND S19 or S28 S-RECORD file:",CR,LF
-		.text 	0
+			.text 	CR,"SEND S19 or S28 S-RECORD file:",CR,LF
+			.text 	0
 	
 MSG_JUMP
-		.text 	CR,"Jumping to address: $"
-		.text 	0
+			.text 	CR,"Jumping to address: $"
+			.text 	0
 	
 * = $FFE4
 NCOP	
