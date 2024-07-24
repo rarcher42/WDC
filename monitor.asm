@@ -95,7 +95,7 @@ HEXIO_B	.byte	?
 HEXIO		=	HEXIO_L				; 24 bit HEX value to print
 
 STACKTOP	=	$7EFF				; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
-* = $F800
+* = $2000
 START 	
 			SEI
 			CLC
@@ -406,24 +406,24 @@ SCMD_V  = %00001011       	; No parity, no echo, no tx or rx IRQ (for now), DTR*
 ; Set up baud rate, parity, stop bits, interrupt control, etc. for
 ; the serial port.
 INIT_SER	
-			LDA     #SCTL_V 		; 9600,n,8,1.  rxclock = txclock
-			STA 	ACIA_SCTL		
-			LDA     #SCMD_V 		; No parity, no echo, no tx or rx IRQ (for now), DTR*
-			STA     ACIA_SCMD
-			LDA     #$80			; Disable all VIA interrupts (not that CPU cares as yet if IRQB=0)		
-                	STA     SYSTEM_VIA_IER
+			LDA	#SCTL_V 		; 9600,n,8,1.  rxclock = txclock
+			STA	ACIA_SCTL		
+			LDA	#SCMD_V 		; No parity, no echo, no tx or rx IRQ (for now), DTR*
+			STA	ACIA_SCMD
+			LDA	#$80			; Disable all VIA interrupts (not that CPU cares as yet if IRQB=0)		
+			STA	SYSTEM_VIA_IER
 			LDA	#%00100000		; Put TIMER2 in timed mode
 			TRB	SYSTEM_VIA_ACR
-               		JSR	SET_SERTMR          	; Delay initial char output one character time in case TX not empty 
+			JSR	SET_SERTMR          	; Delay initial char output one character time in case TX not empty 
 			RTS
 
 SET_SERTMR
 			; Set TIMER2  to meter out minimum inter-character delay (and clear IFR.5)
 			PHA
 			LDA     #<INTER_CHAR_DLY	; Load VIA T2 counter with
-                	STA     SYSTEM_VIA_T2C_L        ; one byte output time
+			STA     SYSTEM_VIA_T2L        ; one byte output time
 			LDA     #>INTER_CHAR_DLY
-                	STA     SYSTEM_VIA_T2C_H
+			STA     SYSTEM_VIA_T2H
 			PLA
 			RTS
 			
@@ -455,18 +455,17 @@ GETSER_X1
 
 PUTSER_RAW		
 			PHA
-			JSR	TXCHDLY
-			;LDA #%001000000			; Bit 5 = IFR.5 = Timer 2 overflow
-			;BIT     SYSTEM_VIA_IFR
-			;SEC					; Still busy outputting last char, so return with C=1 for fail
-			;BEQ	PSR_X1				; be sure to balance stack on exit
+			LDA	SYSTEM_VIA_IFR
+			AND	#MASK5			; Bit 5 = IFR.5 = Timer 2 overflow 
+			SEC					; Still busy outputting last char, so return with C=1 for fail
+			BEQ	PSR_X1				; be sure to balance stack on exit
 			PLA
 			STA	ACIA_SDR
-			;JSR	SET_SERTMR			; Restart TMR2 for one character time; clear IFR.5
+			JSR	SET_SERTMR		; Restart TMR2 for one character time; clear IFR.5
 			CLC					; C=0 means output was successful
-			BRA	PSR_X2				; and return it
+			BRA	PSR_X2			; and return it
 PSR_X1
-			PLA			; retore 
+			PLA					; retore 
 PSR_X2
 			RTS
 
@@ -1189,7 +1188,7 @@ MKNNH
         	AND     #$0F    	; no upper nibble no matter what
         	RTS             	; and return the nibble
 
-* = $F000
+; * = $F000
 MONTBL		
 			.word 	CMD_UNIMPLEMENTED		; Index 0 = "A"
 			.word	CMD_UNIMPLEMENTED
