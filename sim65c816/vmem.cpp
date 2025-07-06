@@ -16,7 +16,6 @@
 // of a simulator, and we're going to honor Mr. Donald Knuth's wisdom about premature optimization.
 // That said, this implementation kind of sucks without some more work. :D
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>

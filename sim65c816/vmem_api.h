@@ -1,4 +1,4 @@
-#pragma once
+
 // Here's where the API interface functions are listed for external use
 const uint8_t MEM_PERM_RD = 0x01;
 const uint8_t MEM_PERM_WR = 0x02;
