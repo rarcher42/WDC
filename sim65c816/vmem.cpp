@@ -178,12 +178,12 @@ int vmem_test(void)
 
     init_mem();
     for (i = 0; i < NUM_ASIDS; i++) {
-        fail = vm_create_block(i, 0x0000, 65536, MEM_RAM);
+        fail = vm_create_block(i, 0x0000, 64*1024, MEM_RAM);
         printf("%d:%d\n", i, fail);
     }
     for (i = 0; i < NUM_ASIDS; i++) {
         p = find_descriptor(i, 0x6502);
-        printf("%d->%p\n", i, p);
+        printf("%d->%p@%p\n", i, p, p->mem);
     }
     
     printf("Hebbo Wurld!\n");
