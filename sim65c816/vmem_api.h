@@ -35,4 +35,4 @@ uint8_t vm_release_block_by_ptr(uint32_t asid, mem_block_descriptor_t* p);
 uint8_t vm_release_block(uint32_t asid, uint32_t address);
 uint8_t vm_read_bytes(uint32_t asid, uint32_t address, uint32_t count, uint8_t *buffer);
 uint8_t vm_write_bytes(uint32_t asid, uint32_t address, uint32_t count, uint8_t* buffer);
-
+uint8_t* vm_ptr_to(uint32_t asid, uint32_t address);

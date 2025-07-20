@@ -211,6 +211,25 @@ uint8_t vm_write_bytes(uint32_t asid, uint32_t address, uint32_t count, uint8_t*
     return fail;
 }
 
+// Convert ASID(VM(address)) to a pointer where that data resides in VM
+// This will be the most efficient way to access memory but must be used with 
+// awareness of overflow or other error conditions
+uint8_t* vm_ptr_to(uint32_t asid, uint32_t address)
+{
+    mem_block_descriptor_t* p;
+    uint8_t* dp = NULL;
+    uint32_t offset;
+
+    p = vm_find(asid, address);
+    if (p != NULL) {
+        offset = address - p->sa;  
+        if (p->mem != NULL) {   // Should not be possible if (p->permissions & MEM_PERM_VALID)
+            dp = (uint8_t *) p->mem + offset;   // Locate the data in memory
+        }
+    }
+    return dp;
+}
+
 int vmem_test(void)
 {
     mem_block_descriptor_t* p;
@@ -248,6 +267,7 @@ int vmem_test(void)
     }
 
     printf("Hebbo Wurld!\n");
+    printf("%p", vm_ptr_to(7, 3072));
     while (1)
         ;
     return 0;
