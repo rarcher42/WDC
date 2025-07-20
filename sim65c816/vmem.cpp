@@ -7,7 +7,7 @@
 // or enforcing smaller address space.  That's up to the simulator that uses these routines.
 // 
 // Note that blocks CANNOT overlap addresses.  If a block is created which overlaps a prior block,
-// it will replace it.  
+// it will replace the prior block.
 // 
 // FIXME: this is super-minimal and oriented for functionality over efficiency.  A sorted list 
 // and on-the-fly management of memory would be faster and more efficient, as is the plan, as 
@@ -19,21 +19,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <string.h>
 #include "vmem.h"
 #include "vmem_api.h"
 
 
 static mem_t mem[NUM_ASIDS];  // The memories :)
-
-// Note: this is only to be called at program initialization.  Please use deallocate_mem_all() to clean up
-// upon exit.
-void init_mem(void)
-{
-    uint32_t i;
-
-    for (i = 0; i < NUM_ASIDS; i++)
-        mem[i].head = NULL;
-}
 
 // Create the block descriptor and allocate a memory region for it.  Return a pointer to link
 // into the memory region list, or NULL if there's an error.  
@@ -48,9 +39,8 @@ static mem_block_descriptor_t* mem_create_block(uint32_t sa, uint32_t size, uint
         if (bp != NULL) {
             bp->sa = sa;
             bp->ea = sa + size - 1;
-            bp->permissions = permissions;
+            bp->permissions = permissions | MEM_PERM_VALID; // Mark as a valid block until explicitly changed
             bp->mem = mrp;  // Point to the memory region just allocated
-            bp->valid = 1;   // Valid because we just finished creating it
         }
     }
     else {
@@ -91,13 +81,13 @@ static uint8_t mem_insert_block(uint32_t asid, mem_block_descriptor_t* p)
     if (p != NULL) {
         sa = p->sa;
         ea = p->ea;
-        overlap = find_descriptor(asid, sa);
+        overlap = vm_find(asid, sa);
         if (overlap != NULL) {
-            overlap->valid = 0;   // Exclude from valid block search
+            overlap->permissions &= ~MEM_PERM_VALID;  // Exclude from valid block search
         } else {
-            overlap = find_descriptor(asid, ea);
+            overlap = vm_find(asid, ea);
             if (overlap != NULL) {
-                overlap->valid = 0;   // Exclude from valid block search
+                overlap->permissions &= ~MEM_PERM_VALID;   // Exclude from valid block search
             }
         }
         // Insert the new node at the head of the list
@@ -110,18 +100,28 @@ static uint8_t mem_insert_block(uint32_t asid, mem_block_descriptor_t* p)
 
 // Start higher-level functions (API-level)
 
+// Note: this is only to be called at program initialization.  Please use deallocate_mem_all() to clean up
+// upon exit.
+void vm_init(void)
+{
+    uint32_t i;
+
+    for (i = 0; i < NUM_ASIDS; i++)
+        mem[i].head = NULL;
+}
+
 // Return the memory descriptor corresponding with specified address, or return NULL if 
-// it was not found.  Does not consider access permissions, just existence.
+// it was not found.  Does not consider access permissions, just existence of address in ASID.
 // FIXME: Implement sorted list for faster lookup.
 // FIXME: Cull invalid entries instead of just marking them invalid
-mem_block_descriptor_t* find_descriptor(uint8_t asid, uint32_t address)
+mem_block_descriptor_t* vm_find(uint8_t asid, uint32_t address)
 {
     mem_block_descriptor_t* nb;
 
     nb = mem[asid].head;
     while (nb != NULL) {
         // In case we delete a block without deleting it immediately, check the Valid bit for stale handles
-        if ((nb->valid) && (address >= nb->sa) && (address <= nb->ea)) {
+        if ((nb->permissions & MEM_PERM_VALID) && (address >= nb->sa) && (address <= nb->ea)) {
             return nb;    // Found it!
         }
         nb = (mem_block_descriptor_t*)nb->next;   // Can't forward-ref *self apparently so must typecast here
@@ -132,65 +132,127 @@ mem_block_descriptor_t* find_descriptor(uint8_t asid, uint32_t address)
 uint8_t vm_create_block(uint32_t asid, uint32_t sa, uint32_t size, uint8_t permissions)
 {
     mem_block_descriptor_t* p;
+    mem_block_descriptor_t* d;
     uint8_t fail = 1;   // Pessimistic assumption
 
-    p = mem_create_block(sa, size, permissions);
+    // Eliminate any pre-existing blocks within this range
+    vm_release_block(asid, sa);
+    vm_release_block(asid, sa - 1 + size);
+    p = mem_create_block(sa, size, permissions);    // Create the data structure
     if (p != NULL) {
         fail = mem_insert_block(asid, p);
     }
     return fail;
 }
 
-uint8_t vm_release_block(uint32_t asid, mem_block_descriptor_t* p)
+uint8_t vm_release_block_by_ptr(uint32_t asid, mem_block_descriptor_t* p)
 {
-    mem_block_descriptor_t* scan;
     uint8_t fail = 1;
     if (p != NULL) {
-        scan = mem[asid].head;
-        while (scan != NULL) {
-            // iwashere
-            scan = (mem_block_descriptor_t *) scan->next;
-        }
-    }
-    return fail;
-}
-
-uint8_t vm_release_block_by_address(uint32_t asid, uint32_t address)
-{
-    mem_block_descriptor_t* p;
-    uint8_t fail = 1;
-
-    p = find_descriptor(asid, address);
-    if (p != NULL) {
-
+        p->permissions &= ~MEM_PERM_VALID;  // Mark invalid
+        free(p->mem);
         fail = 0;
     }
     return fail;
 }
 
+uint8_t vm_release_block(uint32_t asid, uint32_t address)
+{
+    mem_block_descriptor_t* p;
+    uint8_t fail = 1;
+
+    p = vm_find(asid, address);
+    if (p != NULL) {
+        p->permissions &= ~MEM_PERM_VALID;  // Mark invalid
+        free(p->mem);
+        fail = 0;
+    }
+    return fail;
+}
+
+uint8_t vm_read_bytes(uint32_t asid, uint32_t address, uint32_t count, uint8_t* buffer)
+{
+    mem_block_descriptor_t* p;
+    uint32_t offset;
+    uint8_t fail = 1;
+
+    p = vm_find(asid, address);
+
+    if (p != NULL) {
+        if ((p->sa + count - 1) <= p->ea) {
+            offset = address - p->sa;
+            memcpy(buffer, ((uint8_t*)p->mem + offset), count);
+            fail = 0;
+        }
+        else {
+            fail = 2;   // Memory overflow
+        }
+    }
+    return fail;
+}
+
+uint8_t vm_write_bytes(uint32_t asid, uint32_t address, uint32_t count, uint8_t* buffer)
+{
+    mem_block_descriptor_t* p;
+    uint32_t offset;
+    uint8_t fail = 1;
+
+    p = vm_find(asid, address);
+    if (p != NULL) {
+        if ((p->sa + count - 1) <= p->ea) {
+            offset = address - p->sa;
+            memcpy((uint8_t*)p->mem + offset, buffer, count);
+            fail = 0;
+        }
+        else {
+            fail = 2;   // Memory overflow
+        }
+    }
+    return fail;
+}
 
 int vmem_test(void)
 {
     mem_block_descriptor_t* p;
+    uint8_t buffer[256];
     uint32_t i;
     uint8_t fail;
 
-
-    init_mem();
+    vm_init();
     for (i = 0; i < NUM_ASIDS; i++) {
         fail = vm_create_block(i, 0x0000, 64*1024, MEM_RAM);
         printf("%d:%d\n", i, fail);
     }
     for (i = 0; i < NUM_ASIDS; i++) {
-        p = find_descriptor(i, 0x6502);
-        printf("%d->%p@%p\n", i, p, p->mem);
+        p = vm_find(i, 0x6502);
+        if (p != NULL)
+            printf("%d->%p@%p\n", i, p, p->mem);
+        else
+            printf("%d->%p\n", i, p);
     }
     
+    for (i = 0; i < 256; i++) {
+        buffer[i] = i;
+    }
+
+    vm_write_bytes(7, 3000, 256, buffer);
+
+    for (i = 0; i < 256; i++) {
+        buffer[i] = 0;
+    }
+
+    vm_read_bytes(7, 3000, 256, buffer);
+
+    for (i = 0; i < 256; i++) {
+        printf("%d->%d\n", i, buffer[i]);
+    }
+
     printf("Hebbo Wurld!\n");
     while (1)
         ;
     return 0;
 }
+
 
 int main(void)
 {
