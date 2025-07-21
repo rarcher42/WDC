@@ -132,7 +132,6 @@ mem_block_descriptor_t* vm_find(uint8_t asid, uint32_t address)
 uint8_t vm_create_block(uint32_t asid, uint32_t sa, uint32_t size, uint8_t permissions)
 {
     mem_block_descriptor_t* p;
-    mem_block_descriptor_t* d;
     uint8_t fail = 1;   // Pessimistic assumption
 
     // Eliminate any pre-existing blocks within this range
