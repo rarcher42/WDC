@@ -1,0 +1,272 @@
+#include <inttypes.h>
+#include "opcodes.h"
+#include "vmem_api.h"
+
+int main(void);
+// Note that BRK and COP both consume the byte following them, though I cannot find any documentation saying BRK has a parameter.
+// To cover for this, we give it a dummy parameter that gets read from the byte-stream.
+const opcode_t opcodes[256] = {
+    { "BRK",   2,  /* BRK  s      */ }, //  0x00
+    { "ORA",   2,  /* ORA  (d,x)  */ }, //  0x01
+    { "COP",   2,  /* COP  #      */ }, //  0x02
+    { "ORA",   2,  /* ORA  d,s    */ }, //  0x03
+    { "TSB",   2,  /* TSB  d      */ }, //  0x04
+    { "ORA",   2,  /* ORA  d      */ }, //  0x05
+    { "ASL",   2,  /* ASL  d      */ }, //  0x06
+    { "ORA",   2,  /* ORA  [d]    */ }, //  0x07
+    { "PHP",   1,  /* PHP  s      */ }, //  0x08
+    { "ORA",   2,  /* ORA  #      */ }, //  0x09
+    { "ASL",   1,  /* ASL  A      */ }, //  0x0A
+    { "PHD",   1,  /* PHD  s      */ }, //  0x0B
+    { "TSB",   3,  /* TSB  a      */ }, //  0x0C
+    { "ORA",   3,  /* ORA  a      */ }, //  0x0D
+    { "ASL",   3,  /* ASL  a      */ }, //  0x0E
+    { "ORA",   4,  /* ORA  al     */ }, //  0x0F
+    { "BPL",   2,  /* BPL  r      */ }, //  0x10
+    { "ORA",   2,  /* ORA  (d),y  */ }, //  0x11
+    { "ORA",   2,  /* ORA  (d)    */ }, //  0x12
+    { "ORA",   2,  /* ORA  (d,s),y*/ }, //  0x13
+    { "TRB",   2,  /* TRB  d      */ }, //  0x14
+    { "ORA",   2,  /* ORA  d,x    */ }, //  0x15
+    { "ASL",   2,  /* ASL  d,x    */ }, //  0x16
+    { "ORA",   2,  /* ORA  [d],y  */ }, //  0x17
+    { "CLC",   1,  /* CLC  i      */ }, //  0x18
+    { "ORA",   3,  /* ORA  a,y    */ }, //  0x19
+    { "INC",   1,  /* INC  A      */ }, //  0x1A
+    { "TCS",   1,  /* TCS  i      */ }, //  0x1B
+    { "TRB",   3,  /* TRB  a      */ }, //  0x1C
+    { "ORA",   3,  /* ORA  a,x    */ }, //  0x1D
+    { "ASL",   3,  /* ASL  a,x    */ }, //  0x1E
+    { "ORA",   4,  /* ORA  al,x   */ }, //  0x1F
+    { "JSR",   3,  /* JSR  a      */ }, //  0x20
+    { "AND",   3,  /* AND  (d,x)  */ }, //  0x21
+    { "JSL",   4,  /* JSL  al     */ }, //  0x22
+    { "AND",   2,  /* AND  d,s    */ }, //  0x23
+    { "BIT",   2,  /* BIT  d      */ }, //  0x24
+    { "AND",   2,  /* AND  d      */ }, //  0x25
+    { "ROL",   2,  /* ROL  d      */ }, //  0x26
+    { "AND",   2,  /* AND  [d]    */ }, //  0x27
+    { "PLP",   1,  /* PLP  s      */ }, //  0x28
+    { "AND",   2,  /* AND  #      */ }, //  0x29
+    { "ROL",   1,  /* ROL  A      */ }, //  0x2A
+    { "PLD",   1,  /* PLD  s      */ }, //  0x2B
+    { "BIT",   3,  /* BIT  a      */ }, //  0x2C
+    { "AND",   3,  /* AND  a      */ }, //  0x2D
+    { "ROL",   3,  /* ROL  a      */ }, //  0x2E
+    { "AND",   4,  /* AND  al     */ }, //  0x2F
+    { "BMI",   2,  /* BMI  R      */ }, //  0x30
+    { "AND",   2,  /* AND  (d),y  */ }, //  0x31
+    { "AND",   2,  /* AND  (d)    */ }, //  0x32
+    { "AND",   2,  /* AND  (d,s),y*/ }, //  0x33
+    { "BIT",   2,  /* BIT  d,x    */ }, //  0x34
+    { "AND",   2,  /* AND  d,x    */ }, //  0x35
+    { "ROL",   2,  /* ROL  d,x    */ }, //  0x36
+    { "AND",   2,  /* AND  [d],y  */ }, //  0x37
+    { "SEC",   1,  /* SEC  i      */ }, //  0x38
+    { "AND",   3,  /* AND  a,y    */ }, //  0x39
+    { "DEC",   1,  /* DEC  A      */ }, //  0x3A
+    { "TSC",   1,  /* TSC  i      */ }, //  0x3B
+    { "BIT",   3,  /* BIT  a,x    */ }, //  0x3C
+    { "AND",   3,  /* AND  a,x    */ }, //  0x3D
+    { "ROL",   3,  /* ROL  a,x    */ }, //  0x3E
+    { "AND",   4,  /* AND  al,x   */ }, //  0x3F
+    { "RTI",   1,  /* RTI  s      */ }, //  0x40
+    { "EOR",   2,  /* EOR  (d,x)  */ }, //  0x41
+    { "WDM",   2,  /* WDM  i      */ }, //  0x42
+    { "EOR",   2,  /* EOR  d,s    */ }, //  0x43
+    { "MVP",   3,  /* MVP  src,dst*/ }, //  0x44
+    { "EOR",   2,  /* EOR  d      */ }, //  0x45
+    { "LSR",   2,  /* LSR  d      */ }, //  0x46
+    { "EOR",   2,  /* EOR  [d]    */ }, //  0x47
+    { "PHA",   1,  /* PHA  s      */ }, //  0x48
+    { "EOR",   2,  /* EOR  #      */ }, //  0x49
+    { "LSR",   1,  /* LSR  A      */ }, //  0x4A
+    { "PHK",   1,  /* PHK  s      */ }, //  0x4B
+    { "JMP",   3,  /* JMP  a      */ }, //  0x4C
+    { "EOR",   3,  /* EOR  a      */ }, //  0x4D
+    { "LSR",   3,  /* LSR  a      */ }, //  0x4E
+    { "EOR",   4,  /* EOR  al     */ }, //  0x4F
+    { "BVC",   2,  /* BVC  r      */ }, //  0x50
+    { "EOR",   2,  /* EOR  (d),y  */ }, //  0x51
+    { "EOR",   2,  /* EOR  (d)    */ }, //  0x52
+    { "EOR",   2,  /* EOR  (d,s),y*/ }, //  0x53
+    { "MVN",   3,  /* MVN  src,dst*/ }, //  0x54
+    { "EOR",   2,  /* EOR  d,x    */ }, //  0x55
+    { "LSR",   2,  /* LSR  d,x    */ }, //  0x56
+    { "EOR",   2,  /* EOR  [d],y  */ }, //  0x57
+    { "CLI",   1,  /* CLI  i      */ }, //  0x58
+    { "EOR",   3,  /* EOR  a,y    */ }, //  0x59
+    { "PHY",   1,  /* PHY  s      */ }, //  0x5A
+    { "TCD",   1,  /* TCD  i      */ }, //  0x5B
+    { "JMP",   4,  /* JMP  al     */ }, //  0x5C
+    { "EOR",   3,  /* EOR  a,x    */ }, //  0x5D
+    { "LSR",   3,  /* LSR  a,x    */ }, //  0x5E
+    { "EOR",   4,  /* EOR  al,x   */ }, //  0x5F
+    { "RTS",   1,  /* RTS  s      */ }, //  0x60
+    { "ADC",   2,  /* ADC  (dp,X) */ }, //  0x61
+    { "PER",   3,  /* PER  s      */ }, //  0x62
+    { "ADC",   2,  /* ADC  sr,S   */ }, //  0x63
+    { "STZ",   2,  /* STZ  d      */ }, //  0x64
+    { "ADC",   2,  /* ADC  dp     */ }, //  0x65
+    { "ROR",   2,  /* ROR  d      */ }, //  0x66
+    { "ADC",   2,  /* ADC  [dp]   */ }, //  0x67
+    { "PLA",   1,  /* PLA  s      */ }, //  0x68
+    { "ADC",   2,  /* ADC  #      */ }, //  0x69
+    { "ROR",   1,  /* ROR  A      */ }, //  0x6A
+    { "RTL",   1,  /* RTL  s      */ }, //  0x6B
+    { "JMP",   3,  /* JMP  (a)    */ }, //  0x6C
+    { "ADC",   3,  /* ADC  addr   */ }, //  0x6D
+    { "ROR",   3,  /* ROR  a      */ }, //  0x6E
+    { "ADC",   4,  /* ADC  al     */ }, //  0x6F
+    { "BVS",   2,  /* BVS  r      */ }, //  0x70
+    { "ADC",   2,  /* ADC  (d),y  */ }, //  0x71
+    { "ADC",   2,  /* ADC  (d)    */ }, //  0x72
+    { "ADC",   2,  /* ADC  (sr,S),*/ }, //  0x73
+    { "STZ",   2,  /* STZ  d,x    */ }, //  0x74
+    { "ADC",   2,  /* ADC  d,x    */ }, //  0x75
+    { "ROR",   2,  /* ROR  d,x    */ }, //  0x76
+    { "ADC",   2,  /* ADC  [d],y  */ }, //  0x77
+    { "SEI",   1,  /* SEI  i      */ }, //  0x78
+    { "ADC",   3,  /* ADC  a,y    */ }, //  0x79
+    { "PLY",   1,  /* PLY  s      */ }, //  0x7A
+    { "TDC",   1,  /* TDC  i      */ }, //  0x7B
+    { "JMP",   3,  /* JMP  (a,x)  */ }, //  0x7C
+    { "ADC",   3,  /* ADC  a,x    */ }, //  0x7D
+    { "ROR",   3,  /* ROR  a,x    */ }, //  0x7E
+    { "ADC",   4,  /* ADC  al,x   */ }, //  0x7F
+    { "BRA",   2,  /* BRA  r      */ }, //  0x80
+    { "STA",   2,  /* STA  (d,x)  */ }, //  0x81
+    { "BRL",   3,  /* BRL  rl     */ }, //  0x82
+    { "STA",   2,  /* STA  d,s    */ }, //  0x83
+    { "STY",   2,  /* STY  d      */ }, //  0x84
+    { "STA",   2,  /* STA  d      */ }, //  0x85
+    { "STX",   2,  /* STX  d      */ }, //  0x86
+    { "STA",   2,  /* STA  [d]    */ }, //  0x87
+    { "DEY",   1,  /* DEY  i      */ }, //  0x88
+    { "BIT",   2,  /* BIT  #      */ }, //  0x89
+    { "TXA",   1,  /* TXA  i      */ }, //  0x8A
+    { "PHB",   1,  /* PHB  s      */ }, //  0x8B
+    { "STY",   3,  /* STY  a      */ }, //  0x8C
+    { "STA",   3,  /* STA  a      */ }, //  0x8D
+    { "STX",   3,  /* STX  a      */ }, //  0x8E
+    { "STA",   4,  /* STA  al     */ }, //  0x8F
+    { "BCC",   2,  /* BCC  r      */ }, //  0x90
+    { "STA",   2,  /* STA  (d),y  */ }, //  0x91
+    { "STA",   2,  /* STA  (d)    */ }, //  0x92
+    { "STA",   2,  /* STA  (d,s),y*/ }, //  0x93
+    { "STY",   2,  /* STY  d,x    */ }, //  0x94
+    { "STA",   2,  /* STA  d,x    */ }, //  0x95
+    { "STX",   2,  /* STX  d,y    */ }, //  0x96
+    { "STA",   2,  /* STA  [d],y  */ }, //  0x97
+    { "TYA",   1,  /* TYA  i      */ }, //  0x98
+    { "STA",   3,  /* STA  a,y    */ }, //  0x99
+    { "TXS",   1,  /* TXS  i      */ }, //  0x9A
+    { "TXY",   1,  /* TXY  i      */ }, //  0x9B
+    { "STZ",   3,  /* STZ  a      */ }, //  0x9C
+    { "STA",   3,  /* STA  a,x    */ }, //  0x9D
+    { "STZ",   3,  /* STZ  a,x    */ }, //  0x9E
+    { "STA",   4,  /* STA  al,x   */ }, //  0x9F
+    { "LDY",   2,  /* LDY  #      */ }, //  0xA0
+    { "LDA",   2,  /* LDA  (d,x)  */ }, //  0xA1
+    { "LDX",   2,  /* LDX  #      */ }, //  0xA2
+    { "LDA",   2,  /* LDA  d,s    */ }, //  0xA3
+    { "LDY",   2,  /* LDY  d      */ }, //  0xA4
+    { "LDA",   2,  /* LDA  d      */ }, //  0xA5
+    { "LDX",   2,  /* LDX  d      */ }, //  0xA6
+    { "LDA",   2,  /* LDA  [d]    */ }, //  0xA7
+    { "TAY",   1,  /* TAY  i      */ }, //  0xA8
+    { "LDA",   2,  /* LDA  #      */ }, //  0xA9
+    { "TAX",   1,  /* TAX  i      */ }, //  0xAA
+    { "PLB",   1,  /* PLB  s      */ }, //  0xAB
+    { "LDY",   3,  /* LDY  a      */ }, //  0xAC
+    { "LDA",   3,  /* LDA  a      */ }, //  0xAD
+    { "LDX",   3,  /* LDX  a      */ }, //  0xAE
+    { "LDA",   4,  /* LDA  al     */ }, //  0xAF
+    { "BCS",   2,  /* BCS  r      */ }, //  0xB0
+    { "LDA",   2,  /* LDA  (d),y  */ }, //  0xB1
+    { "LDA",   2,  /* LDA  (d)    */ }, //  0xB2
+    { "LDA",   2,  /* LDA  (d,s),y*/ }, //  0xB3
+    { "LDY",   2,  /* LDY  d,x    */ }, //  0xB4
+    { "LDA",   2,  /* LDA  d,x    */ }, //  0xB5
+    { "LDX",   2,  /* LDX  d,y    */ }, //  0xB6
+    { "LDA",   2,  /* LDA  [d],y  */ }, //  0xB7
+    { "CLV",   1,  /* CLV  i      */ }, //  0xB8
+    { "LDA",   3,  /* LDA  a,y    */ }, //  0xB9
+    { "TSX",   1,  /* TSX  i      */ }, //  0xBA
+    { "TYX",   1,  /* TYX  i      */ }, //  0xBB
+    { "LDY",   3,  /* LDY  a,x    */ }, //  0xBC
+    { "LDA",   3,  /* LDA  a,x    */ }, //  0xBD
+    { "LDX",   3,  /* LDX  a,y    */ }, //  0xBE
+    { "LDA",   4,  /* LDA  al,x   */ }, //  0xBF
+    { "CPY",   2,  /* CPY  #      */ }, //  0xC0
+    { "CMP",   2,  /* CMP  (d,x)  */ }, //  0xC1
+    { "REP",   2,  /* REP  #      */ }, //  0xC2
+    { "CMP",   2,  /* CMP  d,s    */ }, //  0xC3
+    { "CPY",   2,  /* CPY  d      */ }, //  0xC4
+    { "CMP",   2,  /* CMP  d      */ }, //  0xC5
+    { "DEC",   2,  /* DEC  d      */ }, //  0xC6
+    { "CMP",   2,  /* CMP  [d]    */ }, //  0xC7
+    { "INY",   1,  /* INY  i      */ }, //  0xC8
+    { "CMP",   2,  /* CMP  #      */ }, //  0xC9
+    { "DEX",   1,  /* DEX  i      */ }, //  0xCA
+    { "WAI",   1,  /* WAI  i      */ }, //  0xCB
+    { "CPY",   3,  /* CPY  a      */ }, //  0xCC
+    { "CMP",   3,  /* CMP  a      */ }, //  0xCD
+    { "DEC",   3,  /* DEC  a      */ }, //  0xCE
+    { "CMP",   4,  /* CMP  al     */ }, //  0xCF
+    { "BNE",   2,  /* BNE  r      */ }, //  0xD0
+    { "CMP",   2,  /* CMP  (d),y  */ }, //  0xD1
+    { "CMP",   2,  /* CMP  (d)    */ }, //  0xD2
+    { "CMP",   2,  /* CMP  (d,s),y*/ }, //  0xD3
+    { "PEI",   2,  /* PEI  (dp)   */ }, //  0xD4
+    { "CMP",   2,  /* CMP  d,x    */ }, //  0xD5
+    { "DEC",   2,  /* DEC  d,x    */ }, //  0xD6
+    { "CMP",   2,  /* CMP  [d],y  */ }, //  0xD7
+    { "CLD",   1,  /* CLD  i      */ }, //  0xD8
+    { "CMP",   3,  /* CMP  a,y    */ }, //  0xD9
+    { "PHX",   1,  /* PHX  s      */ }, //  0xDA
+    { "STP",   1,  /* STP  i      */ }, //  0xDB
+    { "JMP",   3,  /* JMP  [a]    */ }, //  0xDC
+    { "CMP",   3,  /* CMP  a,x    */ }, //  0xDD
+    { "DEC",   3,  /* DEC  a,x    */ }, //  0xDE
+    { "CMP",   4,  /* CMP  al,x   */ }, //  0xDF
+    { "CPX",   2,  /* CPX  #      */ }, //  0xE0
+    { "SBC",   2,  /* SBC  (d,x)  */ }, //  0xE1
+    { "SEP",   2,  /* SEP  #      */ }, //  0xE2
+    { "SBC",   2,  /* SBC  d,s    */ }, //  0xE3
+    { "CPX",   2,  /* CPX  d      */ }, //  0xE4
+    { "SBC",   2,  /* SBC  d      */ }, //  0xE5
+    { "INC",   2,  /* INC  d      */ }, //  0xE6
+    { "SBC",   2,  /* SBC  [d]    */ }, //  0xE7
+    { "INX",   1,  /* INX  i      */ }, //  0xE8
+    { "SBC",   2,  /* SBC  #      */ }, //  0xE9
+    { "NOP",   1,  /* NOP  i      */ }, //  0xEA
+    { "XBA",   1,  /* XBA  i      */ }, //  0xEB
+    { "CPX",   3,  /* CPX  a      */ }, //  0xEC
+    { "SBC",   3,  /* SBC  a      */ }, //  0xED
+    { "INC",   3,  /* INC  a      */ }, //  0xEE
+    { "SBC",   4,  /* SBC  al     */ }, //  0xEF
+    { "BEQ",   2,  /* BEQ  r      */ }, //  0xF0
+    { "SBC",   2,  /* SBC  (d),y  */ }, //  0xF1
+    { "SBC",   2,  /* SBC  (d)    */ }, //  0xF2
+    { "SBC",   2,  /* SBC  (d,s),y*/ }, //  0xF3
+    { "PEA",   3,  /* PEA  s      */ }, //  0xF4
+    { "SBC",   2,  /* SBC  d,x    */ }, //  0xF5
+    { "INC",   2,  /* INC  d,x    */ }, //  0xF6
+    { "SBC",   2,  /* SBC  [d],y  */ }, //  0xF7
+    { "SED",   1,  /* SED  i      */ }, //  0xF8
+    { "SBC",   3,  /* SBC  a,y    */ }, //  0xF9
+    { "PLX",   1,  /* PLX  s      */ }, //  0xFA
+    { "XCE",   1,  /* XCE  i      */ }, //  0xFB
+    { "JSR",   3,  /* JSR  (a,x)  */ }, //  0xFC
+    { "SBC",   3,  /* SBC  a,x    */ }, //  0xFD
+    { "INC",   3,  /* INC  a,x    */ }, //  0xFE
+    { "SBC",   4,  /* SBC  al,x   */ }, //  0xFF
+};
+
+
+int main(void)
+{
+    vmem_test();
+    return 0;
+}
