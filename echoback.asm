@@ -5,9 +5,7 @@
 ; Put the above equates into an included file per peripheral or board
 
         .cpu    "w65c02"
-        .as     			; A=8 bits
-        .xs     			; X, Y = 8 bits
-		
+
 .INCLUDE	"via_symbols.inc"
    
 CTRL_C	= $03
@@ -28,8 +26,7 @@ MASK7		= %10000000
 
 ; Flag definition to OR for SEP, REP
 N_FLAG		= MASK7
-V_FLAG		= MASK6
-M_FLAG		= MASK5
+M_FLAG		= MASK6
 X_FLAG		= MASK4
 D_FLAG		= MASK3
 I_FLAG		= MASK2
