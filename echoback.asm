@@ -40,7 +40,9 @@ START 		SEI
 			LDX	#$FF				; Only 8 bit stack pointer for this non-65816 adaptation
 			TXS
 			JSR	INITCHAR
-ECHO_LOOP	JSR	GETCHAR				; attempt to get next character in	
+			LDA 	#'*'
+			JSR	PUTCHAR
+ECHO_LOOP		JSR	GETCHAR				; attempt to get next character in	
 			BCC	ECHO_LOOP			; if no character received, back again to start
 			JSR	PUTCHAR				; echo it back
 			JMP ECHO_LOOP
