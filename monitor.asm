@@ -95,7 +95,7 @@ HEXIO_B	.byte	?
 HEXIO		=	HEXIO_L				; 24 bit HEX value to print
 
 STACKTOP	=	$7EFF				; Top of RAM = $07EFF (I/O is $7F00-$7FFF)
-* = $2000
+* = $F000
 START 	
 			SEI
 			CLC
