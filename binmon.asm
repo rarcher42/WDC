@@ -14,6 +14,9 @@ LF		= $0A
 CR		= $0D
 SP		= $20
 DEL    		= $7F
+SOF		= $42
+EOF		= $00
+ESC		= $55
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -36,7 +39,7 @@ C_FLAG		= MASK0
 * 		= $C0					; Zero page assignments
 CMD_STATE	.byte	?				; CMD_PROC state
 CMD_ERROR	.byte	?				; Flag error 
-CMD_PTR		.word	?
+CMD_PTR		.word	?				; *(CMD_BUF)
 
 SIZE_CMD_BUF	= 1024					; maximum command length
 *		= $0400					; CMD buffer
@@ -54,14 +57,11 @@ START
                 .as					; Tell assembler A=8 bits
 		SEP	#M_FLAG				; 8 bit A (process byte stream) 
 		LDX	#STACKTOP			; Set 16bit SP to usable RAMtop
-		
 		JSR	INIT_FIFO			; initialize FIFO
 		LDX	#QBF_MSG
 		JSR	PUTSX
-CMD_INIT
-                JSR	INIT_CMD_PROC			; Prepare processor state machine
-CMD_LOOP	
-		JSR	CMD_PROC			; Run processor state machine
+CMD_INIT 	JSR	INIT_CMD_PROC			; Prepare processor state machine
+CMD_LOOP	JSR	CMD_PROC			; Run processor state machine
 		BRA	CMD_LOOP			; then do it some more
 
 ; END main monitor program
@@ -69,48 +69,118 @@ CMD_LOOP
 ; Subroutines begin here
 
 
-INIT_CMD_PROC	
-		STZ	CMD_STATE			; Make sure we start in INIT state
+INIT_CMD_PROC	STZ	CMD_STATE			; Make sure we start in INIT state
+		LDY	#CMD_BUF
+		STY	CMD_PTR				; Must be w/in bounds before INIT state
 		RTS
 
-
-CMD_STATE_INIT
-		STZ	CMD_ERROR			; no command error (yet)
+; State 0: INIT
+CMD_STATE_INIT  STZ	CMD_ERROR			; no command error (yet)
 		LDY	#CMD_BUF			; start at beginning of CMD_BUF
 		STY	CMD_PTR				; store 16 bit pointerkk
 		LDA	#1
 		STA	CMD_STATE
 		RTS
 
+; State 1: AWAIT_SOF
 CMD_STATE_AWAIT_SOF
-		RTS
+		JSR	GET_FRAW
+		BCC	CMD_AX1				; Nothing waiting
+		CMP	#SOF
+		BNE	CMD_AX1
+		LDA	#2
+		STA	CMD_STATE		
+CMD_AX1 	RTS
 
+; State 2: COLLECT bytes
 CMD_STATE_COLLECT
-		RTS
+		JSR	GET_FRAW
+		BCC	CMD_CX1				; if nothing in FIFO, quit
+		CMP	#SOF
+		BNE	CMD_CC1
+		STZ	CMD_STATE			; SOF means reset FSM
+		BRA	CMD_CX1
+CMD_CC1		CMP	#EOF
+		BNE	CMD_CC2
+		LDA	#4
+		STA	CMD_STATE
+		BRA	CMD_CX1
+CMD_CC2		CMP	#ESC
+		BNE	CMD_CC3
+		LDA	#3
+		STA	CMD_STATE
+		BRA	CMD_CX1
+CMD_CC3		LDX	CMD_PTR
+		STA	(0,X)				; Store in CMD_BUF
+		INX					; Increment CMD_PTR
+		STX	CMD_PTR
+CMD_CX1 	RTS
 
+; State 3: TRANSLATE escaped sequences
 CMD_STATE_TRANSLATE
-		RTS
+		JSR	GET_FRAW
+		BCC	CMD_TX1				; If nothing in FIFO, quit
+		CMP	#SOF				; Invalid SOF - abort
+		BNE	CMD_TC1
+		STZ	CMD_STATE			; SOF means reset FSM
+		BRA	CMD_TX1 
+CMD_TC1		CMP	#EOF
+		BNE	CMD_TC2
+		STZ	CMD_STATE			; Can't have EOF after ESC, quit
+		BRA	CMD_TX1
+CMD_TC2		CMP	#$01				; ESCaped SOF
+		BNE	CMD_TC3
+		LDA	#SOF
+		BRA	CMD_TXLAT
+CMD_TC3		CMP	#$02
+		BNE	CMD_TC4
+		LDA	#ESC
+		BRA	CMD_TXLAT
+CMD_TC4		CMP	#$03
+		BNE	CMD_TC5
+		LDA	#EOF
+		BRA	CMD_TXLAT
+CMD_TC5		LDA	#1
+		STA	CMD_ERROR			; Invalid ESC sequence - flag error
+		LDA	#0
+CMD_TXLAT	LDX	CMD_PTR
+		STA	(0,X)				; Store in CMD_BUF
+		INX					; Increment CMD_PTR
+		STX	CMD_PTR
+CMD_TX1 	RTS
 
+; State 4: PROCESS the command
 CMD_STATE_PROCESS
+		STZ	CMD_STATE			; Reset FSM 
+		JSR	PROCESS_CMD_BUF
 		RTS
 
+PROCESS_CMD_BUF
+		LDX	#GOT_CMD
+		JSR	PUTSX
+		RTS
 
-CMD_TBL
-		.word	CMD_STATE_INIT
+CMD_TBL 	.word	CMD_STATE_INIT
 		.word	CMD_STATE_AWAIT_SOF
 		.word 	CMD_STATE_COLLECT
 		.word	CMD_STATE_TRANSLATE
 		.word	CMD_STATE_PROCESS
 		.word	CMD_STATE_INIT
 
-CMD_PROC	LDA	#0
+; Run the command processing FSM
+CMD_PROC 	; Bounds check the command buffer and discard if overflow would occur
+		LDY	CMD_PTR	
+		CPY	#(CMD_BUF+SIZE_CMD_BUF)
+		BCS	CMD_PC1
+		STZ	CMD_STATE			; discard as command can't be valid
+CMD_PC1 	; Jump to the current state
+		LDA	#0
 		XBA					; B = 0
 		LDA	CMD_STATE			; get state
 		ASL	A				; two bytes per entry
 		TAX					; 16 bit table offset (B|A)->X
                 JMP	(CMD_TBL,X)			; execute the current state
 		; No RTS - that happens in each finite state 
-
 
 NMI_ISR 	RTI
 
@@ -177,6 +247,10 @@ PUTSX1 		RTS
 ;
 ;
 
+GOT_CMD
+		.text	CR,LF
+		.text	"Got a command!",CR,LF
+		.text	0
 QBF_MSG
                 .text   CR,LF
                 .text   "        _,-=._              /|_/|",CR,LF
