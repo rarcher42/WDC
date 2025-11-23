@@ -12,7 +12,7 @@ BS		= $08
 LF		= $0A
 CR		= $0D
 SP		= $20
-DEL    		= $7F
+DEL		= $7F
 SOF		= $42
 EOF		= $00
 ESC		= $55
@@ -23,7 +23,7 @@ MASK2		= %00000100
 MASK3		= %00001000
 MASK4		= %00010000
 MASK5		= %00100000
-MASK6 		= %01000000
+MASK6		= %01000000
 MASK7		= %10000000
 
 ; Flag definition to OR for SEP, REP
@@ -281,12 +281,12 @@ GOT_CMD
 		.text	"Got a command!",CR,LF
 		.text	0
 QBF_MSG
-                .text   CR,LF
-                .text   "        _,-=._              /|_/|",CR,LF
-                .text   "       *-.}   `=._,.-=-._.,  @ @.>",CR,LF
-                .text   "          `._ _,-.   )      _,.-'",CR,LF
-                .text   "             `    V.v-'^V''v",CR,CR,LF
-                .text   0
+		.text   CR,LF
+		.text   "        _,-=._              /|_/|",CR,LF
+		.text   "       *-.}   `=._,.-=-._.,  @ @.>",CR,LF
+		.text   "          `._ _,-.   )      _,.-'",CR,LF
+		.text   "             `    V.v-'^V''v",CR,CR,LF
+		.text   0
 		
 ; On exit:
 ; If Carry flag is set, A contains the next byte from the FIFO
