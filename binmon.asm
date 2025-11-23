@@ -53,11 +53,11 @@ STACKTOP	= $7EFF					; Top of RAM (I/O 0x7F00-0x7FFF)
 * = $F800
 START 		
 		SEI
-                CLC					; Enter native 65c816 mode
-                XCE					; 	"
-                .xl					; Tell assembler index=16 bits
+		CLC					; Enter native 65c816 mode
+		XCE					; 	"
+		.xl					; Tell assembler index=16 bits
 		REP	#(X_FLAG | D_FLAG)		; 16 bit index, binary mode
-                .as					; Tell assembler A=8 bits
+		.as					; Tell assembler A=8 bits
 		SEP	#M_FLAG				; 8 bit A (process byte stream) 
 		LDX	#STACKTOP			; Set 16bit SP to usable RAMtop
 		JSR	INIT_FIFO			; initialize FIFO
@@ -258,7 +258,8 @@ OFCONT		STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating
 		NOP							; Hold time following write strobe, to ensure value is latched OK
 		STZ	SYSTEM_VIA_DDRA			; Make port A an input again
 		SEC							; signal success of write to caller
-OFX1		PLA							; restore input character, N and Z flags
+OFX1		
+		PLA							; restore input character, N and Z flags
 		RTS
 
 ; Point X at your NULL-TERMNATED data string
