@@ -1,12 +1,11 @@
 
 ; Assembled with 64TASS
-; 		64tass -c binmon.asm -L binmon.lst
-; 
+; 	64tass -c binmon.asm -L binmon.lst --intel-hex -o binmon.hex; 
 ; Put the above equates into an included file per peripheral or board
 
         	.cpu    "65816"
 
-		.INCLUDE	"via_symbols.inc"
+		.INCLUDE "via_symbols.inc"
    
 CTRL_C		= $03
 BS		= $08
@@ -37,13 +36,17 @@ Z_FLAG		= MASK1
 C_FLAG		= MASK0
 
 * 		= $C0					; Zero page assignments
-CMD_STATE	.byte	?				; CMD_PROC state
-CMD_ERROR	.byte	?				; Flag error 
-CMD_PTR		.word	?				; *(CMD_BUF)
+CMD_STATE	
+		.byte	?				; CMD_PROC state
+CMD_ERROR	
+		.byte	?				; Flag error 
+CMD_PTR		
+		.word	?				; *(CMD_BUF)
 
 SIZE_CMD_BUF	= 1024					; maximum command length
 *		= $0400					; CMD buffer
-CMD_BUF		.fill	SIZE_CMD_BUF
+CMD_BUF		
+		.fill	SIZE_CMD_BUF
 
 STACKTOP	= $7EFF					; Top of RAM (I/O 0x7F00-0x7FFF)
 
@@ -60,8 +63,10 @@ START
 		JSR	INIT_FIFO			; initialize FIFO
 		LDX	#QBF_MSG
 		JSR	PUTSX
-CMD_INIT 	JSR	INIT_CMD_PROC			; Prepare processor state machine
-CMD_LOOP	JSR	CMD_PROC			; Run processor state machine
+CMD_INIT 	
+		JSR	INIT_CMD_PROC			; Prepare processor state machine
+CMD_LOOP	
+		JSR	CMD_PROC			; Run processor state machine
 		BRA	CMD_LOOP			; then do it some more
 
 ; END main monitor program
@@ -69,13 +74,15 @@ CMD_LOOP	JSR	CMD_PROC			; Run processor state machine
 ; Subroutines begin here
 
 
-INIT_CMD_PROC	STZ	CMD_STATE			; Make sure we start in INIT state
+INIT_CMD_PROC	
+		STZ	CMD_STATE			; Make sure we start in INIT state
 		LDY	#CMD_BUF
 		STY	CMD_PTR				; Must be w/in bounds before INIT state
 		RTS
 
 ; State 0: INIT
-CMD_STATE_INIT  STZ	CMD_ERROR			; no command error (yet)
+CMD_STATE_INIT  
+		STZ	CMD_ERROR			; no command error (yet)
 		LDY	#CMD_BUF			; start at beginning of CMD_BUF
 		STY	CMD_PTR				; store 16 bit pointerkk
 		LDA	#1
@@ -90,7 +97,8 @@ CMD_STATE_AWAIT_SOF
 		BNE	CMD_AX1
 		LDA	#2
 		STA	CMD_STATE		
-CMD_AX1 	RTS
+CMD_AX1 	
+		RTS
 
 ; State 2: COLLECT bytes
 CMD_STATE_COLLECT
@@ -100,21 +108,25 @@ CMD_STATE_COLLECT
 		BNE	CMD_CC1
 		STZ	CMD_STATE			; SOF means reset FSM
 		BRA	CMD_CX1
-CMD_CC1		CMP	#EOF
+CMD_CC1		
+		CMP	#EOF
 		BNE	CMD_CC2
 		LDA	#4
 		STA	CMD_STATE
 		BRA	CMD_CX1
-CMD_CC2		CMP	#ESC
+CMD_CC2		
+		CMP	#ESC
 		BNE	CMD_CC3
 		LDA	#3
 		STA	CMD_STATE
 		BRA	CMD_CX1
-CMD_CC3		LDX	CMD_PTR
+CMD_CC3		
+		LDX	CMD_PTR
 		STA	(0,X)				; Store in CMD_BUF
 		INX					; Increment CMD_PTR
 		STX	CMD_PTR
-CMD_CX1 	RTS
+CMD_CX1 	
+		RTS
 
 ; State 3: TRANSLATE escaped sequences
 CMD_STATE_TRANSLATE
@@ -124,30 +136,37 @@ CMD_STATE_TRANSLATE
 		BNE	CMD_TC1
 		STZ	CMD_STATE			; SOF means reset FSM
 		BRA	CMD_TX1 
-CMD_TC1		CMP	#EOF
+CMD_TC1		
+		CMP	#EOF
 		BNE	CMD_TC2
 		STZ	CMD_STATE			; Can't have EOF after ESC, quit
 		BRA	CMD_TX1
-CMD_TC2		CMP	#$01				; ESCaped SOF
+CMD_TC2		
+		CMP	#$01				; ESCaped SOF
 		BNE	CMD_TC3
 		LDA	#SOF
 		BRA	CMD_TXLAT
-CMD_TC3		CMP	#$02
+CMD_TC3		
+		CMP	#$02
 		BNE	CMD_TC4
 		LDA	#ESC
 		BRA	CMD_TXLAT
-CMD_TC4		CMP	#$03
+CMD_TC4		
+		CMP	#$03
 		BNE	CMD_TC5
 		LDA	#EOF
 		BRA	CMD_TXLAT
-CMD_TC5		LDA	#1
+CMD_TC5		
+		LDA	#1
 		STA	CMD_ERROR			; Invalid ESC sequence - flag error
 		LDA	#0
-CMD_TXLAT	LDX	CMD_PTR
+CMD_TXLAT	
+		LDX	CMD_PTR
 		STA	(0,X)				; Store in CMD_BUF
 		INX					; Increment CMD_PTR
 		STX	CMD_PTR
-CMD_TX1 	RTS
+CMD_TX1 	
+		RTS
 
 ; State 4: PROCESS the command
 CMD_STATE_PROCESS
@@ -160,7 +179,8 @@ PROCESS_CMD_BUF
 		JSR	PUTSX
 		RTS
 
-CMD_TBL 	.word	CMD_STATE_INIT
+CMD_TBL 	
+		.word	CMD_STATE_INIT
 		.word	CMD_STATE_AWAIT_SOF
 		.word 	CMD_STATE_COLLECT
 		.word	CMD_STATE_TRANSLATE
@@ -168,12 +188,14 @@ CMD_TBL 	.word	CMD_STATE_INIT
 		.word	CMD_STATE_INIT
 
 ; Run the command processing FSM
-CMD_PROC 	; Bounds check the command buffer and discard if overflow would occur
+CMD_PROC 	
+		; Bounds check the command buffer and discard if overflow would occur
 		LDY	CMD_PTR	
 		CPY	#(CMD_BUF+SIZE_CMD_BUF)
 		BCS	CMD_PC1
 		STZ	CMD_STATE			; discard as command can't be valid
-CMD_PC1 	; Jump to the current state
+CMD_PC1 	
+		; Jump to the current state
 		LDA	#0
 		XBA					; B = 0
 		LDA	CMD_STATE			; get state
@@ -182,9 +204,11 @@ CMD_PC1 	; Jump to the current state
                 JMP	(CMD_TBL,X)			; execute the current state
 		; No RTS - that happens in each finite state 
 
-NMI_ISR 	RTI
+NMI_ISR 	
+		RTI
 
-IRQ_ISR 	RTI
+IRQ_ISR 	
+		RTI
 
 ;;;; ============================= New FIFO functions ======================================
 ; Initializes the system VIA (the USB debugger), and syncs with the USB chip.
@@ -212,7 +236,8 @@ INIT_FIFO
 		
 ; Non-blocking Put FIFO.  Return with carry flag set if buffer is full and nothing was output. 
 ; Return carry clear upon successful queuing
-PUT_FRAW	PHA							; save output character
+PUT_FRAW	
+		PHA							; save output character
 		LDA	SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
 		AND	#FIFO_TXE				; If TXE is low, we can accept data into FIFO.  If high, return immmediately
 		CLC							; FIFO is full, so don't try to queue it!	Signal failure
@@ -237,13 +262,16 @@ OFX1		PLA							; restore input character, N and Z flags
 		RTS
 
 ; Point X at your NULL-TERMNATED data string
-PUTSX 		LDA	(0,X)
+PUTSX 		
+		LDA	(0,X)
 		BEQ	PUTSX1				; Don't print the NULL terminator 
-PUTSXL1		JSR	PUT_FRAW
+PUTSXL1		
+		JSR	PUT_FRAW
 		BCC	PUTSXL1				; If FIFO full, let it empty
 		INX					; Prepare to get next character
 		BRA	PUTSX
-PUTSX1 		RTS 
+PUTSX1 		
+		RTS 
 ;
 ;
 
