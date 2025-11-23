@@ -1,6 +1,6 @@
 
 ; Assembled with 64TASS
-; 		64tass -c stripmon.asm -L stripmon.lst
+; 		64tass -c binmon.asm -L binmon.lst
 ; 
 ; Put the above equates into an included file per peripheral or board
 
