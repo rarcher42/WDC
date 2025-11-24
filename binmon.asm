@@ -87,6 +87,8 @@ CMD_STATE_INIT
 		STY	CMD_PTR				; store 16 bit pointerkk
 		LDA	#1
 		STA	CMD_STATE
+		LDA	#'0'
+		JSR	PUT_FRAW
 		RTS
 
 ; State 1: AWAIT_SOF
@@ -96,7 +98,10 @@ CMD_STATE_AWAIT_SOF
 		CMP	#SOF
 		BNE	CMD_AX1
 		LDA	#2
-		STA	CMD_STATE		
+		STA	CMD_STATE
+		LDA     #'1'
+                JSR     PUT_FRAW
+		
 CMD_AX1 	
 		RTS
 
@@ -104,6 +109,10 @@ CMD_AX1
 CMD_STATE_COLLECT
 		JSR	GET_FRAW
 		BCC	CMD_CX1				; if nothing in FIFO, quit
+		PHA
+		LDA     #'2'
+                JSR     PUT_FRAW
+		PLA
 		CMP	#SOF
 		BNE	CMD_CC1
 		STZ	CMD_STATE			; SOF means reset FSM
@@ -132,6 +141,10 @@ CMD_CX1
 CMD_STATE_TRANSLATE
 		JSR	GET_FRAW
 		BCC	CMD_TX1				; If nothing in FIFO, quit
+		PHA
+		LDA     #'3'
+                JSR     PUT_FRAW
+		PLA
 		CMP	#SOF				; Invalid SOF - abort
 		BNE	CMD_TC1
 		STZ	CMD_STATE			; SOF means reset FSM
@@ -170,11 +183,15 @@ CMD_TX1
 
 ; State 4: PROCESS the command
 CMD_STATE_PROCESS
+		LDA     #'4'
+                JSR     PUT_FRAW
 		STZ	CMD_STATE			; Reset FSM 
 		JSR	PROCESS_CMD_BUF
 		RTS
 
 PROCESS_CMD_BUF
+		LDA	#'C'
+		JSR	PUT_FRAW
 		LDX	#GOT_CMD
 		JSR	PUTSX
 		RTS
