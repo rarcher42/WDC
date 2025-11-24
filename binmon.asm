@@ -13,8 +13,10 @@ LF		= $0A
 CR		= $0D
 SP		= $20
 DEL		= $7F
-SOF		= $42
-EOF		= $00
+#SOF		= $42
+SOF		= '~`
+#EOF		= $00
+EOF		= '&'
 ESC		= $55
 
 MASK0		= %00000001
