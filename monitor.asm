@@ -1,6 +1,6 @@
 
 ; Assembled with 64TASS
-; 		64tass -c bootloader.asm -L bootloader.lst
+; 		64tass -c monitor.asm -L monitor.lst
 ; 
 ; Put the above equates into an included file per peripheral or board
 
@@ -10,10 +10,6 @@
 		
 .INCLUDE	"via_symbols.inc"
 .INCLUDE	"acia_symbols.inc"
-
-; Monitor hooks - These we MUST JSL to
-;RAW_GETC	=	$E036
-;RAW_PUTC	= 	$E04B
 
 CTRL_C	= $03
 BS		= $08

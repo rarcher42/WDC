@@ -53,18 +53,19 @@ CMD_BUF
 STACKTOP	= $7EFF					; Top of RAM (I/O 0x7F00-0x7FFF)
 
 * = $F800
+		.xl
+		.as
 START 		
 		SEI
 		CLC					; Enter native 65c816 mode
-		XCE					; 	"
-		.xl					; Tell assembler index=16 bits
+		XCE					; 
 		REP	#(X_FLAG | D_FLAG)		; 16 bit index, binary mode
-		.as					; Tell assembler A=8 bits
 		SEP	#M_FLAG				; 8 bit A (process byte stream) 
 		LDX	#STACKTOP			; Set 16bit SP to usable RAMtop
+		TXS						; Set up the stack pointer
 		JSR	INIT_FIFO			; initialize FIFO
-		LDX	#QBF_MSG
-		JSR	PUTSX
+		LDY	#QBF_MSG
+		JSR	PUTSY
 CMD_INIT 	
 		JSR	INIT_CMD_PROC			; Prepare processor state machine
 CMD_LOOP	
@@ -78,19 +79,17 @@ CMD_LOOP
 
 INIT_CMD_PROC	
 		STZ	CMD_STATE			; Make sure we start in INIT state
-		LDY	#CMD_BUF
-		STY	CMD_PTR				; Must be w/in bounds before INIT state
+		LDX	#CMD_BUF
+		STX	CMD_PTR				; Must be w/in bounds before INIT state
 		RTS
 
 ; State 0: INIT
 CMD_STATE_INIT  
 		STZ	CMD_ERROR			; no command error (yet)
-		LDY	#CMD_BUF			; start at beginning of CMD_BUF
-		STY	CMD_PTR				; store 16 bit pointerkk
+		LDX	#CMD_BUF			; start at beginning of CMD_BUF
+		STX	CMD_PTR				; store 16 bit pointerkk
 		LDA	#1
 		STA	CMD_STATE
-		LDA	#'0'
-		JSR	PUT_FRAW
 		RTS
 
 ; State 1: AWAIT_SOF
@@ -101,8 +100,8 @@ CMD_STATE_AWAIT_SOF
 		BNE	CMD_AX1
 		LDA	#2
 		STA	CMD_STATE
-		LDA     #'1'
-                JSR     PUT_FRAW
+		LDA	#'1'
+        JSR	PUT_FRAW
 		
 CMD_AX1 	
 		RTS
@@ -112,8 +111,8 @@ CMD_STATE_COLLECT
 		JSR	GET_FRAW
 		BCC	CMD_CX1				; if nothing in FIFO, quit
 		PHA
-		LDA     #'2'
-                JSR     PUT_FRAW
+		LDA	#'2'
+        JSR	PUT_FRAW
 		PLA
 		CMP	#SOF
 		BNE	CMD_CC1
@@ -133,7 +132,7 @@ CMD_CC2
 		BRA	CMD_CX1
 CMD_CC3		
 		LDX	CMD_PTR
-		STA	(0,X)				; Store in CMD_BUF
+		STA	0,X				; Store in CMD_BUF
 		INX					; Increment CMD_PTR
 		STX	CMD_PTR
 CMD_CX1 	
@@ -145,7 +144,7 @@ CMD_STATE_TRANSLATE
 		BCC	CMD_TX1				; If nothing in FIFO, quit
 		PHA
 		LDA     #'3'
-                JSR     PUT_FRAW
+        JSR     PUT_FRAW
 		PLA
 		CMP	#SOF				; Invalid SOF - abort
 		BNE	CMD_TC1
@@ -177,7 +176,7 @@ CMD_TC5
 		LDA	#0
 CMD_TXLAT	
 		LDX	CMD_PTR
-		STA	(0,X)				; Store in CMD_BUF
+		STA	0,X				; Store in CMD_BUF
 		INX					; Increment CMD_PTR
 		STX	CMD_PTR
 CMD_TX1 	
@@ -185,8 +184,8 @@ CMD_TX1
 
 ; State 4: PROCESS the command
 CMD_STATE_PROCESS
-		LDA     #'4'
-                JSR     PUT_FRAW
+		LDA	#'4'
+        JSR	PUT_FRAW
 		STZ	CMD_STATE			; Reset FSM 
 		JSR	PROCESS_CMD_BUF
 		RTS
@@ -194,8 +193,8 @@ CMD_STATE_PROCESS
 PROCESS_CMD_BUF
 		LDA	#'C'
 		JSR	PUT_FRAW
-		LDX	#GOT_CMD
-		JSR	PUTSX
+		LDY	#GOT_CMD
+		JSR	PUTSY
 		RTS
 
 CMD_TBL 	
@@ -209,8 +208,8 @@ CMD_TBL
 ; Run the command processing FSM
 CMD_PROC 	
 		; Bounds check the command buffer and discard if overflow would occur
-		LDY	CMD_PTR	
-		CPY	#(CMD_BUF+SIZE_CMD_BUF)
+		LDX	CMD_PTR	
+		CPX	#(CMD_BUF+SIZE_CMD_BUF)
 		BCS	CMD_PC1
 		STZ	CMD_STATE			; discard as command can't be valid
 CMD_PC1 	
@@ -220,7 +219,7 @@ CMD_PC1
 		LDA	CMD_STATE			; get state
 		ASL	A				; two bytes per entry
 		TAX					; 16 bit table offset (B|A)->X
-                JMP	(CMD_TBL,X)			; execute the current state
+        JMP	(CMD_TBL,X)		; execute the current state
 		; No RTS - that happens in each finite state 
 
 NMI_ISR 	
@@ -254,7 +253,7 @@ INIT_FIFO
 
 		
 ; Non-blocking Put FIFO.  Return with carry flag set if buffer is full and nothing was output. 
-; Return carry clear upon successful queuing
+; Return carry clear upon successful queuing.  Save input char so it doesn't need to be reloaded should FIFO be full
 PUT_FRAW	
 		PHA							; save output character
 		LDA	SYSTEM_VIA_IORB			; Read in FIFO status Port for FIFO
@@ -281,16 +280,16 @@ OFX1
 		PLA							; restore input character, N and Z flags
 		RTS
 
-; Point X at your NULL-TERMNATED data string
-PUTSX 		
-		LDA	(0,X)
-		BEQ	PUTSX1				; Don't print the NULL terminator 
+; Point Y at your NULL-TERMNATED data string
+PUTSY 		
+		LDA	0,Y
+		BEQ	PUTSY1				; Don't print the NULL terminator 
 PUTSXL1		
 		JSR	PUT_FRAW
 		BCC	PUTSXL1				; If FIFO full, let it empty
-		INX					; Prepare to get next character
-		BRA	PUTSX
-PUTSX1 		
+		INY						; Prepare to get next character
+		BRA	PUTSY
+PUTSY1 		
 		RTS 
 ;
 ;
