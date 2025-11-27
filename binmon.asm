@@ -6,18 +6,23 @@
         	.cpu    "65816"
 
 		.INCLUDE "via_symbols.inc"
-   
-CTRL_C	= $03
+		
+	
 BS		= $08
 LF		= $0A
 CR		= $0D
+DLE		= $10
+CTRL_P  = DLE
 SP		= $20
 DEL		= $7F
-;SOF		= $42
-SOF		= '~'
-;EOF		= $00
-EOF		= '&'
-ESC		= $55
+; Frame format characters
+ST_X	= $02
+CTRL_B	= ST_X
+ETX		= $03
+CTRL_C	= ETX
+SOF		= ST_X
+EOF		= ETX
+ESC		= DLE
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -73,7 +78,21 @@ CMD_LOOP
 		BRA	CMD_LOOP			; then do it some more
 
 ; END main monitor program
-
+QBF_MSG
+		.text   CR,LF
+		.text   "        _,-=._              /|_/|",CR,LF
+		.text   "       *-.}   `=._,.-=-._.,  @ @.>",CR,LF
+		.text   "          `._ _,-.   )      _,.-'",CR,LF
+		.text   "             `    V.v-'^V''v",CR,CR,LF
+		.text   0
+		
+CMD_TBL 	
+		.word	CMD_STATE_INIT
+		.word	CMD_STATE_AWAIT_SOF
+		.word 	CMD_STATE_COLLECT
+		.word	CMD_STATE_TRANSLATE
+		.word	CMD_STATE_PROCESS
+		.word	CMD_STATE_INIT
 ; Subroutines begin here
 
 
@@ -82,6 +101,24 @@ INIT_CMD_PROC
 		LDX	#0
 		STX	CMD_IX				; Must be w/in bounds before INIT state
 		RTS
+
+; Run the command processing FSM
+CMD_PROC 	
+		; Bounds check the command buffer and discard if overflow would occur
+		LDX	CMD_IX	
+		CPX	#SIZE_CMD_BUF
+		BCC	CMD_PC1
+		STZ	CMD_STATE			; discard as command can't be valid
+CMD_PC1 	
+		; Jump to the current state
+		LDA	#0
+		XBA					; B = 0
+		LDA	CMD_STATE			; get state
+		ASL	A				; two bytes per entry
+		TAX					; 16 bit table offset (B|A)->X
+        JMP	(CMD_TBL,X)		; execute the current state
+		; No RTS - that happens in each finite state 
+
 
 ; State 0: INIT
 CMD_STATE_INIT  
@@ -193,30 +230,7 @@ PROCESS_CMD_BUF
 		JSR	PUTCH
 		RTS
 
-CMD_TBL 	
-		.word	CMD_STATE_INIT
-		.word	CMD_STATE_AWAIT_SOF
-		.word 	CMD_STATE_COLLECT
-		.word	CMD_STATE_TRANSLATE
-		.word	CMD_STATE_PROCESS
-		.word	CMD_STATE_INIT
 
-; Run the command processing FSM
-CMD_PROC 	
-		; Bounds check the command buffer and discard if overflow would occur
-		LDX	CMD_IX	
-		CPX	#SIZE_CMD_BUF
-		BCC	CMD_PC1
-		STZ	CMD_STATE			; discard as command can't be valid
-CMD_PC1 	
-		; Jump to the current state
-		LDA	#0
-		XBA					; B = 0
-		LDA	CMD_STATE			; get state
-		ASL	A				; two bytes per entry
-		TAX					; 16 bit table offset (B|A)->X
-        JMP	(CMD_TBL,X)		; execute the current state
-		; No RTS - that happens in each finite state 
 
 NMI_ISR 	
 		RTI
@@ -296,17 +310,7 @@ PUTSY1
 ;
 ;
 
-GOT_CMD
-		.text	CR,LF
-		.text	"Got a command!",CR,LF
-		.text	0
-QBF_MSG
-		.text   CR,LF
-		.text   "        _,-=._              /|_/|",CR,LF
-		.text   "       *-.}   `=._,.-=-._.,  @ @.>",CR,LF
-		.text   "          `._ _,-.   )      _,.-'",CR,LF
-		.text   "             `    V.v-'^V''v",CR,CR,LF
-		.text   0
+
 		
 ; On exit:
 ; If Carry flag is set, A contains the next byte from the FIFO
