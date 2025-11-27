@@ -7,7 +7,7 @@
 
 		.INCLUDE "via_symbols.inc"
    
-CTRL_C		= $03
+CTRL_C	= $03
 BS		= $08
 LF		= $0A
 CR		= $0D
@@ -42,10 +42,10 @@ CMD_STATE
 		.byte	?				; CMD_PROC state
 CMD_ERROR	
 		.byte	?				; Flag error 
-CMD_PTR		
+CMD_IX		
 		.word	?				; *(CMD_BUF)
 
-SIZE_CMD_BUF	= 1024					; maximum command length
+SIZE_CMD_BUF	= 512			; maximum command length
 *		= $0400					; CMD buffer
 CMD_BUF		
 		.fill	SIZE_CMD_BUF
@@ -79,19 +79,19 @@ CMD_LOOP
 
 INIT_CMD_PROC	
 		STZ	CMD_STATE			; Make sure we start in INIT state
-		LDX	#CMD_BUF
-		STX	CMD_PTR				; Must be w/in bounds before INIT state
+		LDX	#0
+		STX	CMD_IX				; Must be w/in bounds before INIT state
 		RTS
 
 ; State 0: INIT
 CMD_STATE_INIT  
 		STZ	CMD_ERROR			; no command error (yet)
-		LDX	#CMD_BUF			; start at beginning of CMD_BUF
-		STX	CMD_PTR				; store 16 bit pointerkk
+		LDX	#0					; start at beginning of CMD_BUF
+		STX	CMD_IX				; store 16 bit pointerkk
 		LDA	#1
 		STA	CMD_STATE
 		RTS
-
+		
 ; State 1: AWAIT_SOF
 CMD_STATE_AWAIT_SOF
 		JSR	GET_FRAW
@@ -99,10 +99,7 @@ CMD_STATE_AWAIT_SOF
 		CMP	#SOF
 		BNE	CMD_AX1
 		LDA	#2
-		STA	CMD_STATE
-		LDA	#'1'
-        JSR	PUT_FRAW
-		
+		STA	CMD_STATE	
 CMD_AX1 	
 		RTS
 
@@ -110,10 +107,6 @@ CMD_AX1
 CMD_STATE_COLLECT
 		JSR	GET_FRAW
 		BCC	CMD_CX1				; if nothing in FIFO, quit
-		PHA
-		LDA	#'2'
-        JSR	PUT_FRAW
-		PLA
 		CMP	#SOF
 		BNE	CMD_CC1
 		STZ	CMD_STATE			; SOF means reset FSM
@@ -131,10 +124,10 @@ CMD_CC2
 		STA	CMD_STATE
 		BRA	CMD_CX1
 CMD_CC3		
-		LDX	CMD_PTR
-		STA	0,X				; Store in CMD_BUF
-		INX					; Increment CMD_PTR
-		STX	CMD_PTR
+		LDX	CMD_IX
+		STA	CMD_BUF,X				; Store in CMD_BUF
+		INX					; Increment CMD_IX
+		STX	CMD_IX
 CMD_CX1 	
 		RTS
 
@@ -142,10 +135,6 @@ CMD_CX1
 CMD_STATE_TRANSLATE
 		JSR	GET_FRAW
 		BCC	CMD_TX1				; If nothing in FIFO, quit
-		PHA
-		LDA     #'3'
-        JSR     PUT_FRAW
-		PLA
 		CMP	#SOF				; Invalid SOF - abort
 		BNE	CMD_TC1
 		STZ	CMD_STATE			; SOF means reset FSM
@@ -175,26 +164,33 @@ CMD_TC5
 		STA	CMD_ERROR			; Invalid ESC sequence - flag error
 		LDA	#0
 CMD_TXLAT	
-		LDX	CMD_PTR
-		STA	0,X				; Store in CMD_BUF
-		INX					; Increment CMD_PTR
-		STX	CMD_PTR
+		LDX	CMD_IX
+		STA	CMD_BUF,X				; Store in CMD_BUF
+		INX					; Increment CMD_IX
+		STX	CMD_IX
 CMD_TX1 	
 		RTS
 
 ; State 4: PROCESS the command
 CMD_STATE_PROCESS
-		LDA	#'4'
-        JSR	PUT_FRAW
+		; Remove - for testing only
+		LDX	CMD_IX
+		STZ	CMD_BUF,X			; null-terminate the cmd buffer (note: could overflow)
 		STZ	CMD_STATE			; Reset FSM 
 		JSR	PROCESS_CMD_BUF
 		RTS
 
 PROCESS_CMD_BUF
-		LDA	#'C'
-		JSR	PUT_FRAW
-		LDY	#GOT_CMD
+		LDA	#'['
+		JSR	PUTCH
+		LDY	#CMD_BUF
 		JSR	PUTSY
+		LDA	#']'
+		JSR	PUTCH
+		LDA	#CR
+		JSR	PUTCH
+		LDA	#LF
+		JSR	PUTCH
 		RTS
 
 CMD_TBL 	
@@ -208,9 +204,9 @@ CMD_TBL
 ; Run the command processing FSM
 CMD_PROC 	
 		; Bounds check the command buffer and discard if overflow would occur
-		LDX	CMD_PTR	
-		CPX	#(CMD_BUF+SIZE_CMD_BUF)
-		BCS	CMD_PC1
+		LDX	CMD_IX	
+		CPX	#SIZE_CMD_BUF
+		BCC	CMD_PC1
 		STZ	CMD_STATE			; discard as command can't be valid
 CMD_PC1 	
 		; Jump to the current state
@@ -261,7 +257,8 @@ PUT_FRAW
 		CLC							; FIFO is full, so don't try to queue it!	Signal failure
 		BNE	OFX1					; 0 = OK to write to FIFO; 1 = Wait, FIFO full!
 			; FIFO has room - write A to FIFO in a series of steps
-OFCONT		STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
+OFCONT		
+		STZ	SYSTEM_VIA_DDRA			; (Defensive) Start with Port A input/floating 
 		LDA	#(FIFO_RD + FIFO_WR)	; RD=1 WR=1 (WR must go 1->0 for FIFO write)
 		STA	SYSTEM_VIA_IORB			; Make sure write is high (and read too!)
 		PLA							; Restore the data to send
@@ -280,13 +277,18 @@ OFX1
 		PLA							; restore input character, N and Z flags
 		RTS
 
+; Blocking next char output
+PUTCH
+		JSR	PUT_FRAW
+		BCC	PUTCH
+		RTS
+		
 ; Point Y at your NULL-TERMNATED data string
 PUTSY 		
 		LDA	0,Y
 		BEQ	PUTSY1				; Don't print the NULL terminator 
 PUTSXL1		
-		JSR	PUT_FRAW
-		BCC	PUTSXL1				; If FIFO full, let it empty
+		JSR	PUTCH
 		INY						; Prepare to get next character
 		BRA	PUTSY
 PUTSY1 		
@@ -344,10 +346,10 @@ NABORT
 		.word	START
 * = $FFEA
 NNMI	
-		.word	START		; NMI interrupt in native mode
+		.word	NMI_ISR		; NMI interrupt in native mode
 * = $FFEE
 NIRQ	
-		.word	START 
+		.word	IRQ_ISR 
 
 * = $FFF4
 ECOP	
@@ -357,13 +359,13 @@ EABORT
 		.word	START
 * = $FFFA
 ENMI		
-		.word	NMI_ISR		; NMI interrupt in 65c02 emulation mode
+		.word	START		; NMI interrupt in 65c02 emulation mode
 * = $FFFC
 ERESET	
 		.word	START		; RESET exception in all modes
 * = $FFFE
 EIRQ	
-		.word	IRQ_ISR 
+		.word	START
 
 .end					; finally.  das Ende.  Fini.  It's over.  Go home!
 
