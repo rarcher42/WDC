@@ -6,8 +6,8 @@
         	.cpu    "65816"
 
 		.INCLUDE "via_symbols.inc"
-		
-	
+
+
 BS		= $08
 LF		= $0A
 CR		= $0D
@@ -22,7 +22,6 @@ ETX		= $03
 CTRL_C	= ETX
 SOF		= ST_X
 EOF		= ETX
-ESC		= DLE
 ACK		= $06
 NAK		= $15
 
@@ -93,12 +92,13 @@ CMD_LOOP
 
 VER_MSG
 		.text	CR,LF
-		.text  	"************************"
-		.text	"*     BinMon v0.1      *"
-		.text	"*     Ross Archer      *"
-		.text	"* In the Public Domain *"
-		.text	"*   27 November 2025   *"
-		.text	"************************"
+		.text  	"************************",CR,LF
+		.text	"*     BinMon v0.1      *",CR,LF
+		.text	"*     Ross Archer      *",CR,LF
+		.text	"* In the Public Domain *",CR,LF
+		.text	"*   27 November 2025   *",CR,LF
+		.text	"************************",CR,LF
+		.text	0
 ; END main monitor program
 QBF_MSG
 		.text   CR,LF
@@ -149,35 +149,38 @@ CMD_STATE_INIT
 		STX	CMD_IX				; store 16 bit pointerkk
 		LDA	#1
 		STA	CMD_STATE
+		;LDA	#'0'
+		;JSR	PUTCH
 		RTS
 		
 ; State 1: AWAIT_SOF
 CMD_STATE_AWAIT_SOF
 		JSR	GET_FRAW
 		BCC	CMD_AX1				; Nothing waiting
+		;PHA
+		;LDA	#'1'
+		;JSR	PUTCH
+		;PLA
 		CMP	#SOF
 		BNE	CMD_AX1
 		LDA	#2
 		STA	CMD_STATE	
-CMD_AX1 	
-		RTS
+CMD_AX1 RTS
 
 ; State 2: COLLECT bytes
 CMD_STATE_COLLECT
 		JSR	GET_FRAW
 		BCC	CMD_CX1				; if nothing in FIFO, quit
-		CMP	#SOF
-		BNE	CMD_CC1
-		STZ	CMD_STATE			; SOF means reset FSM
-		BRA	CMD_CX1
-CMD_CC1		
-		CMP	#EOF
-		BNE	CMD_CC2
-		LDA	#4
+		;PHA
+		;LDA	#'2'
+		;JSR	PUTCH
+		;PLA
+		CMP	#EOF				; In case we hit the end of text
+		BNE CMD_CC2	
+		LDA	#4					; Go process the command
 		STA	CMD_STATE
-		BRA	CMD_CX1
-CMD_CC2		
-		CMP	#ESC
+		BRA	CMD_CX1				; 
+CMD_CC2	CMP	#DLE
 		BNE	CMD_CC3
 		LDA	#3
 		STA	CMD_STATE
@@ -185,48 +188,47 @@ CMD_CC2
 CMD_CC3		
 		LDX	CMD_IX
 		STA	CMD_BUF,X				; Store in CMD_BUF
-		INX					; Increment CMD_IX
+		INX							; Increment CMD_IX; point to next free slot
 		STX	CMD_IX
 CMD_CX1 	
 		RTS
 
-; State 3: TRANSLATE escaped sequences
+; State 3: TRANSLATE DLE'ed sequences
 CMD_STATE_TRANSLATE
 		JSR	GET_FRAW
-		BCC	CMD_TX1				; If nothing in FIFO, quit
-		CMP	#SOF				; Invalid SOF - abort
-		BNE	CMD_TC1
-		STZ	CMD_STATE			; SOF means reset FSM
-		BRA	CMD_TX1 
-CMD_TC1		
-		CMP	#EOF
+		BCC	CMD_TX1				; If nothing in FIFO, quit 
+		;PHA
+		;LDA	#'3'
+		;JSR	PUTCH
+		;PLA
+CMD_TC1	CMP	#EOF
 		BNE	CMD_TC2
-		STZ	CMD_STATE			; Can't have EOF after ESC, quit
+		LDA	#4
+		STA	CMD_STATE
 		BRA	CMD_TX1
-CMD_TC2		
-		CMP	#$11				; ESCaped SOF
+CMD_TC2	CMP	#$11				; DLE' escaped SOF
 		BNE	CMD_TC3
 		LDA	#SOF
 		BRA	CMD_TXLAT
-CMD_TC3		
-		CMP	#$12
+CMD_TC3	CMP	#$12
 		BNE	CMD_TC4
-		LDA	#ESC
+		LDA	#DLE
 		BRA	CMD_TXLAT
-CMD_TC4		
-		CMP	#$13
+CMD_TC4	CMP	#$13
 		BNE	CMD_TC5
 		LDA	#EOF
 		BRA	CMD_TXLAT
 CMD_TC5		
 		LDA	#1
-		STA	CMD_ERROR			; Invalid ESC sequence - flag error
+		STA	CMD_ERROR			; Invalid DLE sequence - flag error
 		LDA	#0
 CMD_TXLAT	
 		LDX	CMD_IX
 		STA	CMD_BUF,X		; Store in CMD_BUF
 		INX					; Increment CMD_IX
 		STX	CMD_IX
+		LDA	#2
+		STA	CMD_STATE
 CMD_TX1 	
 		RTS
 
@@ -268,7 +270,7 @@ RD_CMD
 		JSR	PUTCH			; Unencoded SOF starts frame
 		LDY	#0
 RD_BN1	LDA	[EA_PTR],Y		; Get next byte
-		JSR	CHR_ENCODE		; Send the byte there, possibly ESCaped as two bytes
+		JSR	CHR_ENCODE		; Send the byte there, possibly DLE escaped as two bytes
 		INY
 		CPY	CNT				; Length word
 		BNE	RD_BN1
@@ -316,7 +318,7 @@ ECHO_CMD
 		JSR	PUTCH
 		LDX	#0
 EC_CM1	LDA	CMD_BUF,X
-		JSR	CHR_ENCODE		; Send byte, possibly ESCaping for transmission
+		JSR	CHR_ENCODE		; Send byte, possibly DLE'ing it for transmission
 		INX
 		CPX	CMD_IX
 		BNE	EC_CM1
@@ -423,23 +425,23 @@ SENDC1	LDA	#SOF
 		LDA	#EOF
 		BRA	PUTCH
 
-; This subroutine translates SOF ESC and EOF for inside-packet protection of OOB characters.  Enter at PUTCH by itself for untranslated output	
+; This subroutine translates SOF DLE and EOF for inside-packet protection of OOB characters.  Enter at PUTCH by itself for untranslated output	
 CHR_ENCODE
 		CMP	#SOF
 		BNE	WENC1
-		LDA	#ESC
+		LDA	#DLE
 		JSR	PUTCH
 		LDA	#$11
 		BRA	PUTCH
-WENC1	CMP	#ESC
+WENC1	CMP	#DLE
 		BNE	WENC2
-		LDA	#ESC
+		LDA	#DLE
 		JSR	PUTCH
 		LDA	#$12
 		BRA	PUTCH
 WENC2	CMP	#EOF
 		BNE	PUTCH
-		LDA	#ESC
+		LDA	#DLE
 		JSR	PUTCH
 		LDA	#$13
 PUTCH	; Blocking char output
