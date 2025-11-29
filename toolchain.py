@@ -192,7 +192,22 @@ if __name__ == "__main__":
     fifo = FIFO(SERIAL_PORT, 921600, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 0.1)
     v = Frame()
     fifo.read()     # Ditch any power on messages or noise bursts
+   
+    '''
+    # Test JML
+    inf = b'\x03\00\xF8\00'
+    outf = v.wire_encode(inf)
+    # print("Writing ", outf)
+    fifo.write(outf)
+    time.sleep(0.1)
+    reinf = fifo.read()
+    print(reinf)
+    time.sleep(5.0)
+    reinfo = fifo.read()
+    print(reinfo)
     
+    exit(0)
+    '''
     '''
     inf = write_mem_cmd(0x0200, b'0123456789ABCDEF!')
     outf = v.wire_encode(inf)
@@ -208,7 +223,9 @@ if __name__ == "__main__":
     rereinf = v.wire_decode(reinf)
     dump_hex(0x000200, rereinf)
     exit(0)
-    
+
+    '''
+
     while True:
         n = random.randrange(1, 256)
         inf = b'E'
@@ -217,13 +234,14 @@ if __name__ == "__main__":
         outf = v.wire_encode(inf)
         # print("Writing ", outf)
         fifo.write(outf)
-        time.sleep(0.1)
+        #time.sleep(0.1)
         reinf = fifo.read()
         #print("Reading ", reinf)
         rereinf = v.wire_decode(reinf)
         print(len(rereinf), "\t", rereinf == inf)
         if rereinf != inf:
             break
+    
     '''
     start_t = time.time()
     for sa in range(0, 0x010000, 256):
@@ -242,3 +260,4 @@ if __name__ == "__main__":
     end_t = time.time()
     print("\n\nDumped 64K byte in %10.1f seconds" % (end_t - start_t))
     print("Rate = %10.1f bytes/second: " % (65536.0 / (end_t - start_t)))
+    '''
