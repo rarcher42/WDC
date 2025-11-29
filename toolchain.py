@@ -130,10 +130,10 @@ class Frame:
                
 
 class FIFO:
-    def __init__(self, port='COM17', b=1200, parity=serial.PARITY_NONE, size=serial.EIGHTBITS,
+    def __init__(self, port='COM17', br=921600, parity=serial.PARITY_NONE, size=serial.EIGHTBITS,
                  stops=serial.STOPBITS_ONE, to=3.0):
         try:
-            self.ser = serial.Serial(port=port, baudrate=b, parity=parity,
+            self.ser = serial.Serial(port=port, baudrate=br, parity=parity,
                             bytesize=size, stopbits=stops, timeout=to)
             self.open=True
         except:
@@ -153,6 +153,53 @@ class FIFO:
         self.ser.close()
         return
 
+# Create a bidirectional pipeline to the 65c816 CPU
+class CPU_Pipe:
+    def __init__ (self, port, rate):
+        self.SERIAL_PORT = port
+        self.fifo = FIFO(port, rate, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 0.1)
+        self.v = Frame()
+        self.fifo.read()     # Ditch any power on messages or noise bursts
+    
+    def cmd_dialog(self, cmd):
+        outf = self.v.wire_encode(cmd)
+        self.fifo.write(outf)
+        reinf = self.fifo.read()
+        return self.v.wire_decode(reinf)
+        
+    def read_mem(self, sa_24, nbytes):
+        assert(nbytes < 257)
+        sab = ((sa_24 >> 16) & 0xFF).to_bytes(1, 'little')
+        sah = ((sa_24 >> 8) & 0xFF).to_bytes(1, 'little')
+        sal = ((sa_24) & 0xFF).to_bytes(1, 'little')
+        nbl = (nbytes & 0xFF).to_bytes(1, 'little')
+        nbh = ((nbytes >> 8) & 0xFF).to_bytes(1, 'little')
+        cmd = b'\x01'+sal+sah+sab+nbl+nbh
+        return self.cmd_dialog(cmd)
+        
+    def write_mem(self, sa_24, data):
+        assert(len(data) < 257)
+        sab = ((sa_24 >> 16) & 0xFF).to_bytes(1, 'little')
+        sah = ((sa_24 >> 8) & 0xFF).to_bytes(1, 'little')
+        sal = ((sa_24) & 0xFF).to_bytes(1, 'little')
+        cmd = b'\x02' + sal + sah + sab 
+        for b in data:
+            cmd += b.to_bytes(1, "little")
+        return  self.cmd_dialog(cmd)
+
+    def jump_long(self, sa_24):
+        sab = ((sa_24 >> 16) & 0xFF).to_bytes(1, 'little')
+        sah = ((sa_24 >> 8) & 0xFF).to_bytes(1, 'little')
+        sal = ((sa_24) & 0xFF).to_bytes(1, 'little')
+        cmd = b'\x03' + sal + sah + sab
+        resp = self.cmd_dialog(cmd)
+        # Should ACK the command before jumping since we don't know what will happen afterwards
+        if resp == b'\x06':
+            print("\nACK")
+        time.sleep(5.0)                 # Allow transferred program time to generate output for us (if any)
+        return self.fifo.read()         # Return target program's initial output
+        
+        
 def dump_hex(sa_24, data):
     count = 0
     for b in data:
@@ -167,65 +214,43 @@ def dump_hex(sa_24, data):
             count = 0
     return
 
-def read_mem_cmd(sa_24, nbytes):
-    assert(nbytes < 257)
-    sab = ((sa_24 >> 16) & 0xFF).to_bytes(1, 'little')
-    sah = ((sa_24 >> 8) & 0xFF).to_bytes(1, 'little')
-    sal = ((sa_24) & 0xFF).to_bytes(1, 'little')
-    nbl = (nbytes & 0xFF).to_bytes(1, 'little')
-    nbh = ((nbytes >> 8) & 0xFF).to_bytes(1, 'little')
-    return  b'\x01'+sal+sah+sab+nbl+nbh
+def test_page_read_write(address):
+    # Create a page of test data to write: Fill up a page with FF FE FD FC ... 01 00
+    outb = b''
+    for b in range(255, -1, -1):
+        outb += b.to_bytes(1, "little")
+    # OPEN a bidirectional CPU pipeline
+    pipe = CPU_Pipe('COM4', 921600)
+   
+    print("Writing data directly to memory")
+    resp = pipe.write_mem(address, outb)
+    print("Write returns: ", resp)
     
-def write_mem_cmd(sa_24, data):
-    assert(len(data) < 257)
-    sab = ((sa_24 >> 16) & 0xFF).to_bytes(1, 'little')
-    sah = ((sa_24 >> 8) & 0xFF).to_bytes(1, 'little')
-    sal = ((sa_24) & 0xFF).to_bytes(1, 'little')
-    ob = b'\x02' + sal + sah + sab 
-    for b in data:
-        ob += b.to_bytes(1, "little")
-    print("ob=", ob)
-    return ob
+    print("Reading back the data")
+    mem = pipe.read_mem(address, 256)
+    dump_hex(address, mem)
+    return 
+ 
+def test_go(address):
+    pipe = CPU_Pipe('COM4', 921600)
+    reply = pipe.jump_long(address)
+    print(reply)
+    return
     
-SERIAL_PORT = "COM4"  
 if __name__ == "__main__":
-    fifo = FIFO(SERIAL_PORT, 921600, serial.PARITY_NONE, serial.EIGHTBITS, serial.STOPBITS_ONE, 0.1)
-    v = Frame()
-    fifo.read()     # Ditch any power on messages or noise bursts
-   
-    '''
-    # Test JML
-    inf = b'\x03\00\xF8\00'
-    outf = v.wire_encode(inf)
-    # print("Writing ", outf)
-    fifo.write(outf)
-    time.sleep(0.1)
-    reinf = fifo.read()
-    print(reinf)
-    time.sleep(5.0)
-    reinfo = fifo.read()
-    print(reinfo)
+    test_page_read_write(0x000200)
+    test_go(0x00F800)
     
-    exit(0)
+    pipe = CPU_Pipe('COM4', 921600)
+    time.sleep(10.0)            # Allow user to see the display for a bit 
+    start_t = time.time()
+    for sa in range(0, 0x010000, 256):
+        mem = pipe.read_mem(sa, 256)
+        dump_hex(sa, mem)
+    end_t = time.time()
+    print("\n\nDumped 64K byte in %10.1f seconds" % (end_t - start_t))
+    print("Rate = %10.1f bytes/second: " % (65536.0 / (end_t - start_t)))
     '''
-    '''
-    inf = write_mem_cmd(0x0200, b'0123456789ABCDEF!')
-    outf = v.wire_encode(inf)
-    fifo.write(outf)
-    reinf = fifo.read()
-    rereinf = v.wire_decode(reinf)
-    print(rereinf)
-   
-    inf = read_mem_cmd(0x0200, 17)
-    outf = v.wire_encode(inf)
-    fifo.write(outf)
-    reinf = fifo.read()
-    rereinf = v.wire_decode(reinf)
-    dump_hex(0x000200, rereinf)
-    exit(0)
-
-    '''
-
     while True:
         n = random.randrange(1, 256)
         inf = b'E'
@@ -240,24 +265,12 @@ if __name__ == "__main__":
         rereinf = v.wire_decode(reinf)
         print(len(rereinf), "\t", rereinf == inf)
         if rereinf != inf:
+            print("ERROR: raw string:")
+            print(inf)
+            print("ERROR: wire string:")
+            print(outf)
             break
     
-    '''
-    start_t = time.time()
-    for sa in range(0, 0x010000, 256):
-        inf = read_mem_cmd(sa, 256)
-        outf = v.wire_encode(inf)
-        meow = v.wire_decode(outf)
-        if meow != inf:
-            print("ERROR in encode/decode on Python side!")
-        #print("Writing ", outf)
-        fifo.write(outf)
-        reinf = fifo.read()
-        #print("Reading ", reinf)
-        rereinf = v.wire_decode(reinf)
-        #print(len(rereinf), rereinf)
-        dump_hex(sa, rereinf)
-    end_t = time.time()
-    print("\n\nDumped 64K byte in %10.1f seconds" % (end_t - start_t))
-    print("Rate = %10.1f bytes/second: " % (65536.0 / (end_t - start_t)))
+    
+
     '''
