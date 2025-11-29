@@ -2,22 +2,18 @@ import random
 import time
 import sys
 
-
-
 ''' 
-01 READ BYTES:  01 SAL SAH SAB BCL BCH
-02 WRITE BYTES  02 SAL SAH SAB B0 B1 B2..... BN
+01 READ BYTES:  01 SAL SAH SAB BCL BCH N     (read N+1 bytes 1-256)
+02 WRITE BYTES  02 SAL SAH SAB B0 B1 B2..... BN  (use CMD_IX to find last byte to write)
 03 JUMP TO ADDRESS  03 SAL SAH SAB  
-04 CALL TO ADDRESS  04 SAL SAH SAB
-
 '''
 class Frame:
     ''' Encapsulate a frame '''
     def __init__(self):
-        self.SOF = 0x42
-        self.ESC = 0x55
-        self.EOF = 0x00
-        self.SIZE_CMD_BUF = 1024
+        self.SOF = 0x02
+        self.ESC = 0x10
+        self.EOF = 0x03
+        self.SIZE_CMD_BUF = 512
     ''' 
         Encapsulate the payload to exclude SOF & EOF with ESC encoding 
         A wire frame begins with SOF and ends with EOF for ease of decoding 
@@ -29,13 +25,13 @@ class Frame:
         for b in rawpay:
             if b == self.SOF: 
                 outbytes += self.ESC.to_bytes(1)
-                outbytes += 0x01.to_bytes(1)
+                outbytes += 0x11.to_bytes(1)
             elif b == self.ESC:
                 outbytes += self.ESC.to_bytes(1)
-                outbytes += 0x02.to_bytes(1)
+                outbytes += 0x12.to_bytes(1)
             elif b == self.EOF:
                 outbytes += self.ESC.to_bytes(1)
-                outbytes += 0x03.to_bytes(1) 
+                outbytes += 0x13.to_bytes(1) 
             else:
                 outbytes += b.to_bytes(1)
         outbytes += self.EOF.to_bytes(1)  # End the wire frame
@@ -105,17 +101,17 @@ class Frame:
                 elif b == self.EOF:
                     state = 0
                     continue
-                elif b == 0x01:
+                elif b == 0x11:
                     outbytes += self.SOF.to_bytes(1)
                     cmd_ptr += 1
                     state = 2 
                     continue
-                elif b == 0x02:
+                elif b == 0x12:
                     outbytes += self.ESC.to_bytes(1)
                     cmd_ptr += 1
                     state = 2
                     continue
-                elif b == 0x03:
+                elif b == 0x13:
                     outbytes += self.EOF.to_bytes(1)
                     cmd_ptr += 1
                     state = 2
@@ -137,8 +133,8 @@ class Frame:
 if __name__ == "__main__":
     v = Frame()
    
-    for i in range(10000):
-        n = random.randrange(1, 1024)
+    for i in range(100000):
+        n = random.randrange(1, 512)
         inf = random.randbytes(n)
         outf = v.wire_encode(inf)
         reinf = v.wire_decode(outf)

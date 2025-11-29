@@ -23,6 +23,8 @@ CTRL_C	= ETX
 SOF		= ST_X
 EOF		= ETX
 ESC		= DLE
+ACK		= $06
+NAK		= $15
 
 MASK0		= %00000001
 MASK1		= %00000010
@@ -42,13 +44,24 @@ I_FLAG		= MASK2
 Z_FLAG		= MASK1
 C_FLAG		= MASK0
 
-* 		= $C0					; Zero page assignments
+* 		= $40					; Zero page assignments
 CMD_STATE	
 		.byte	?				; CMD_PROC state
 CMD_ERROR	
 		.byte	?				; Flag error 
 CMD_IX		
-		.word	?				; *(CMD_BUF)
+		.word	?				; Nexxt char in CMD_BUF  @ *(CMD_BUF + CMD_IX)
+
+EA_L	.byte	?				; 24 bit read pointer LOW
+EA_H	.byte	?				; 	" HIGH
+EA_B	.byte	?				; 	" PAGE #
+EA_PTR	=	EA_L				; Address of EA_PTR
+
+CNT_L	.byte	?				; Must be 16 bits to transfer 16 bit index register
+CNT_H	.byte	?
+CNT		= CNT_L
+
+TEMP	.byte	?
 
 SIZE_CMD_BUF	= 512			; maximum command length
 *		= $0400					; CMD buffer
@@ -69,7 +82,7 @@ START
 		LDX	#STACKTOP			; Set 16bit SP to usable RAMtop
 		TXS						; Set up the stack pointer
 		JSR	INIT_FIFO			; initialize FIFO
-		LDY	#QBF_MSG
+		LDY	#VER_MSG
 		JSR	PUTSY
 CMD_INIT 	
 		JSR	INIT_CMD_PROC			; Prepare processor state machine
@@ -77,6 +90,15 @@ CMD_LOOP
 		JSR	CMD_PROC			; Run processor state machine
 		BRA	CMD_LOOP			; then do it some more
 
+
+VER_MSG
+		.text	CR,LF
+		.text  	"************************"
+		.text	"*     BinMon v0.1      *"
+		.text	"*     Ross Archer      *"
+		.text	"* In the Public Domain *"
+		.text	"*   27 November 2025   *"
+		.text	"************************"
 ; END main monitor program
 QBF_MSG
 		.text   CR,LF
@@ -113,7 +135,7 @@ CMD_PC1
 		; Jump to the current state
 		LDA	#0
 		XBA					; B = 0
-		LDA	CMD_STATE			; get state
+		LDA	CMD_STATE		; get state
 		ASL	A				; two bytes per entry
 		TAX					; 16 bit table offset (B|A)->X
         JMP	(CMD_TBL,X)		; execute the current state
@@ -182,17 +204,17 @@ CMD_TC1
 		STZ	CMD_STATE			; Can't have EOF after ESC, quit
 		BRA	CMD_TX1
 CMD_TC2		
-		CMP	#$01				; ESCaped SOF
+		CMP	#$11				; ESCaped SOF
 		BNE	CMD_TC3
 		LDA	#SOF
 		BRA	CMD_TXLAT
 CMD_TC3		
-		CMP	#$02
+		CMP	#$12
 		BNE	CMD_TC4
 		LDA	#ESC
 		BRA	CMD_TXLAT
 CMD_TC4		
-		CMP	#$03
+		CMP	#$13
 		BNE	CMD_TC5
 		LDA	#EOF
 		BRA	CMD_TXLAT
@@ -202,7 +224,7 @@ CMD_TC5
 		LDA	#0
 CMD_TXLAT	
 		LDX	CMD_IX
-		STA	CMD_BUF,X				; Store in CMD_BUF
+		STA	CMD_BUF,X		; Store in CMD_BUF
 		INX					; Increment CMD_IX
 		STX	CMD_IX
 CMD_TX1 	
@@ -210,26 +232,76 @@ CMD_TX1
 
 ; State 4: PROCESS the command
 CMD_STATE_PROCESS
-		; Remove - for testing only
-		LDX	CMD_IX
-		STZ	CMD_BUF,X			; null-terminate the cmd buffer (note: could overflow)
-		STZ	CMD_STATE			; Reset FSM 
-		JSR	PROCESS_CMD_BUF
+		STZ	CMD_STATE			; Upon return to FSM loop, we're looking for a new command
+		; Parse and dispatch
+		LDA	CMD_BUF				; Get the command
+		CMP	#1
+		BNE	PCBC1
+		JMP	RD_CMD
+PCBC1	CMP	#2
+		BNE	PCBC2
+		JMP	WR_CMD
+PCBC2	CMP	#3
+		BNE	PCBERR
+		JMP	GO_CMD
+PCBERR	JSR	SEND_NAK			; Unknown cmd
 		RTS
-
-PROCESS_CMD_BUF
-		LDA	#'['
-		JSR	PUTCH
-		LDY	#CMD_BUF
-		JSR	PUTSY
-		LDA	#']'
-		JSR	PUTCH
-		LDA	#CR
-		JSR	PUTCH
-		LDA	#LF
-		JSR	PUTCH
+; [01][start-address-Low][start-address-high][start-address-page][LEN_L][LEN_H]		; 
+; Read n+1 bytes (1 to 256 inclusive) and Return
+; X / CMD_IX is index to next byte
+RD_CMD	
+		LDA	CMD_BUF+1		; Note: this could be more efficient.  Make it work first.
+		STA	EA_L
+		LDA	CMD_BUF+2
+		STA	EA_H
+		LDA	CMD_BUF+3
+		STA	EA_B
+		; Store 8 bit count as 16 bits for indexing
+		LDA	CMD_BUF+4
+		STA	CNT_L
+		LDA	CMD_BUF+5
+		STA	CNT_H
+		LDA	#SOF
+		JSR	PUTCH			; Unencoded SOF starts frame
+		LDY	#0
+RD_BN1	LDA	[EA_PTR],Y		; Get next byte
+		JSR	CHR_ENCODE		; Send the byte there, possibly ESCaped as two bytes
+		INY
+		CPY	CNT				; Length word
+		BNE	RD_BN1
+RD_BX1	LDA	#EOF
+		JSR	PUTCH			; Unencoded EOF ends frame
 		RTS
-
+		
+; [02][start-address-Low][start-address-high][start-address-page][b0][b1]...[bn]
+; Use CMD_IX to determine last write byte
+WR_CMD
+		LDA	CMD_BUF+1		; Note: this could be more efficient.  Make it work first.
+		STA	EA_L
+		LDA	CMD_BUF+2
+		STA	EA_H
+		LDA	CMD_BUF+3
+		STA	EA_B
+		; Store 8 bit count as 16 bits for indexing
+		LDA	CMD_IX
+		STA	CNT_L
+		LDA	CMD_IX+1
+		STA	CNT_H
+		LDX	#4				; Index of first CMD_BUF byte to write
+		LDY	#0				; Where to write
+WR_BN1	LDA	CMD_BUF,X		; Get the next buffer byte
+		STA	[EA_PTR],Y		; Write it out
+		INX
+		INY
+		CPX	CNT
+		BNE	WR_BN1
+		JSR	SEND_ACK
+		RTS
+	
+; [03][start-address-low][start-address-high][start-address-high]	
+GO_CMD	
+		JSR	SEND_ACK
+		RTS
 
 
 NMI_ISR 	
@@ -262,6 +334,31 @@ INIT_FIFO
 		RTS					
 
 		
+; On exit:
+; If Carry flag is set, A contains the next byte from the FIFO
+; If carry flag is clear, no character was received and A doesn't contain anything meaningful
+GET_FRAW
+		LDA	SYSTEM_VIA_IORB			; Check RXF flag
+		AND	#FIFO_RXF				; If clear, we're OK to read.  If set, there's no data waiting
+		CLC							; Assume no character (overridden if A != 0)
+		BNE 	INFXIT					; If RXF is 1, then no character is waiting!
+		STZ	SYSTEM_VIA_DDRA			; Make Port A inputs
+		LDA	#FIFO_RD
+		STA	SYSTEM_VIA_IORB			; RD=1 WR=0 (RD must go to 0 to read
+		NOP
+		STZ	SYSTEM_VIA_IORB			; RD=0 WR=0	- FIFO presents data to port A	
+		NOP
+		LDA	SYSTEM_VIA_IORA			; read data in
+		PHA
+		LDA	#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
+		STA	SYSTEM_VIA_IORB
+		PLA
+		SEC							; we got a byte!
+INFXIT	
+		RTS
+
+
+	
 ; Non-blocking Put FIFO.  Return with carry flag set if buffer is full and nothing was output. 
 ; Return carry clear upon successful queuing.  Save input char so it doesn't need to be reloaded should FIFO be full
 PUT_FRAW	
@@ -290,13 +387,45 @@ OFCONT
 OFX1		
 		PLA							; restore input character, N and Z flags
 		RTS
+; SEND NAK packet
+SEND_NAK
+		LDA	#NAK
+		STA	TEMP
+		BRA	SENDC1
+; SEND ACK packet
+SEND_ACK
+		LDA	#ACK
+		STA	TEMP
+SENDC1	LDA	#SOF
+		JSR	PUTCH
+		LDA	TEMP
+		JSR	PUTCH
+		LDA	#EOF
+		BRA	PUTCH
 
-; Blocking next char output
-PUTCH
+; This subroutine translates SOF ESC and EOF for inside-packet protection of OOB characters.  Enter at PUTCH by itself for untranslated output	
+CHR_ENCODE
+		CMP	#SOF
+		BNE	WENC1
+		LDA	#ESC
+		JSR	PUTCH
+		LDA	#$11
+		BRA	PUTCH
+WENC1	CMP	#ESC
+		BNE	WENC2
+		LDA	#ESC
+		JSR	PUTCH
+		LDA	#$12
+		BRA	PUTCH
+WENC2	CMP	#EOF
+		BNE	PUTCH
+		LDA	#ESC
+		JSR	PUTCH
+		LDA	#$13
+PUTCH	; Blocking char output
 		JSR	PUT_FRAW
 		BCC	PUTCH
 		RTS
-		
 ; Point Y at your NULL-TERMNATED data string
 PUTSY 		
 		LDA	0,Y
@@ -309,31 +438,6 @@ PUTSY1
 		RTS 
 ;
 ;
-
-
-		
-; On exit:
-; If Carry flag is set, A contains the next byte from the FIFO
-; If carry flag is clear, no character was received and A doesn't contain anything meaningful
-GET_FRAW
-		LDA	SYSTEM_VIA_IORB			; Check RXF flag
-		AND	#FIFO_RXF				; If clear, we're OK to read.  If set, there's no data waiting
-		CLC							; Assume no character (overridden if A != 0)
-		BNE 	INFXIT					; If RXF is 1, then no character is waiting!
-		STZ	SYSTEM_VIA_DDRA			; Make Port A inputs
-		LDA	#FIFO_RD
-		STA	SYSTEM_VIA_IORB			; RD=1 WR=0 (RD must go to 0 to read
-		NOP
-		STZ	SYSTEM_VIA_IORB			; RD=0 WR=0	- FIFO presents data to port A	
-		NOP
-		LDA	SYSTEM_VIA_IORA			; read data in
-		PHA
-		LDA	#FIFO_RD				; Restore back to inactive signals RD=1 and WR=0
-		STA	SYSTEM_VIA_IORB
-		PLA
-		SEC							; we got a byte!
-INFXIT	
-		RTS
 
 
 
