@@ -242,8 +242,11 @@ PCBC1	CMP	#2
 		BNE	PCBC2
 		JMP	WR_CMD
 PCBC2	CMP	#3
-		BNE	PCBERR
+		BNE	PCBC3
 		JMP	GO_CMD
+PCBC3	CMP	#'E'				; echo command
+		BNE	PCBERR
+		JMP	ECHO_CMD
 PCBERR	JSR	SEND_NAK			; Unknown cmd
 		RTS
 ; [01][start-address-Low][start-address-high][start-address-page][LEN_L][LEN_H]		; 
@@ -299,10 +302,27 @@ WR_BN1	LDA	CMD_BUF,X		; Get the next buffer byte
 		RTS
 	
 ; [03][start-address-low][start-address-high][start-address-high]	
-GO_CMD	
-		JSR	SEND_ACK
-		RTS
+GO_CMD	JSR	SEND_ACK
+		LDA	CMD_BUF+1		; Note: this could be more efficient.  Make it work first.
+		STA	EA_L
+		LDA	CMD_BUF+2
+		STA	EA_H
+		LDA	CMD_BUF+3
+		STA	EA_B
+		JML [EA_PTR]
 
+ECHO_CMD
+		LDA	#SOF
+		JSR	PUTCH
+		LDX	#0
+EC_CM1	LDA	CMD_BUF,X
+		JSR	CHR_ENCODE		; Send byte, possibly ESCaping for transmission
+		INX
+		CPX	CMD_IX
+		BNE	EC_CM1
+		LDA	#EOF
+		JSR	PUTCH
+		RTS
 
 NMI_ISR 	
 		RTI
