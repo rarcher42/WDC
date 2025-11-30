@@ -198,6 +198,78 @@ class CPU_Pipe:
             print("\nACK")
         time.sleep(5.0)                 # Allow transferred program time to generate output for us (if any)
         return self.fifo.read()         # Return target program's initial output
+    
+    def str_to_bytes(self, s):
+        outb = b''
+        for i in range(0, len(s), 2):
+            x = int(s[i:i+2], 16)
+            outb += x.to_bytes(1, 'little')
+        return outb
+        
+    def send_srec(self, srec_fn):
+        fh = open(srec_fn, "r")
+        lines = fh.readlines()
+        for li in lines:
+            li = li.strip()
+            rectype = li[0:2]
+            if rectype == 'S0':
+                # print("Rec(S0) - DISCARD")
+                pass
+            elif rectype == 'S1':
+                ads = li[4:8]
+                nstr = li[2:4]
+                n = int(nstr, 16) - 3   # Subtract out checksum and 2 address bytes
+                # print("Rec(S1) - 16 bits @$", ads) 
+                addr = int(ads, 16)
+                #print("ADDR = $%04X" % addr)
+                datastr = li[8:-2]
+                #print(len(datastr), datastr)
+                barry = self.str_to_bytes(datastr)
+                self.write_mem(addr, barry)
+            elif rectype == 'S2':
+                ads = li[4:10]
+                nstr = li[2:4]
+                n = int(nstr, 16) - 4   # Subtract checksum and 3 address bytes
+                # print("Rec(S2) - 24 bits @$", ads)
+                addr = int(ads, 16)
+                # print("ADDR = $%06X" % addr)
+                datastr = li[10:-2]
+                # print(len(datastr), datastr)
+                barry = self.str_to_bytes(datastr)
+                self.write_mem(addr, barry)
+            elif rectype == 'S3':
+                ads = li[4:12]
+                nstr = li[2:4]
+                n = int(nstr, 16) - 5   # Subtract checksum and 4 address bytes
+                # print("Rec(S3) - 32 bits @$", ads)
+                addr = int(ads, 16)
+                # print("n = ", n)
+                # print("ADDR = $%08X" % addr)
+                datastr = li[12:-2]
+                #print(len(datastr), datastr)
+                barry = self.str_to_bytes(datastr)
+                self.write_mem(addr, barry)
+            elif rectype == 'S5':
+                print("Rec(S5)")
+            elif rectype == 'S7':
+                ads = li[4:12]
+                # print("Rec(S7) - 32 bits @$", ads)
+                addr = int(ads, 16)
+                # print("ADDR = $%08X" % addr)
+            elif rectype == 'S8':
+                ads = li[4:10]
+                # print("Rec(S8 - 24 bits @$", ads)
+                addr = int(ads, 16)
+                # print("ADDR = $%06X" % addr)
+            elif rectype == 'S9':
+                ads = li[4:8]
+                #print("Rec(S9) - 16 bits @$", ads)
+                addr = int(ads, 16)
+                #print("ADDR = $%04X" % addr)
+            else:
+                print("Unknown record type %s" % rectype)
+        fh.close()
+        return
         
         
 def dump_hex(sa_24, data):
@@ -238,10 +310,18 @@ def test_go(address):
     return
     
 if __name__ == "__main__":
-    test_page_read_write(0x000200)
-    test_go(0x00F800)
     
     pipe = CPU_Pipe('COM4', 921600)
+    pipe.send_srec("rammon.hex")
+    res = pipe.jump_long(0x002000)
+    print(res)
+    exit(0)
+    mem = pipe.read_mem(0x002000, 256)
+    dump_hex(0x002000, mem)
+    #test_page_read_write(0x000200)
+    test_go(0x002000)
+    
+    
     time.sleep(10.0)            # Allow user to see the display for a bit 
     start_t = time.time()
     for sa in range(0, 0x010000, 256):
